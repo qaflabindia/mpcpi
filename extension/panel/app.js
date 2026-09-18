@@ -18,6 +18,7 @@ import { SkillRegistry, SEED_SKILLS } from '../agent/skills.js';
 import { buildTools } from '../agent/tools.js';
 import { Agent, SUGGESTED_PROMPTS } from '../agent/agent.js';
 import * as EX from '../core/explain.js';
+import { helpMark, installHelp } from './help.js';
 import * as CH from './charts.js';
 
 /* ─────────────────────────── state ─────────────────────────── */
@@ -28,7 +29,7 @@ const S = {
   config: { ...DEFAULT_CONFIG, anchor: null },
   settings: null, providers: [], mcpTools: [],
   displayCcy: 'BCCT', selectedTrade: null, horizon: 30, waterfallMode: 'spread',
-  running: false, abort: null, ready: false,
+  running: false, abort: null, ready: false, theme: 'dark',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -66,7 +67,11 @@ function table(cols, rows, opts = {}) {
   const t = el('table', 'tbl');
   const thead = el('thead');
   const tr = el('tr');
-  for (const c of cols) tr.append(el('th', c.num ? 'num' : '', esc(c.label)));
+  for (const c of cols) {
+    // The label is escaped; the help mark is trusted markup from our own
+    // registry. Embedding markup into `label` printed it as literal text.
+    tr.append(el('th', c.num ? 'num' : '', esc(c.label) + (c.help ? helpMark(c.help) : '')));
+  }
   thead.append(tr); t.append(thead);
   const tb = el('tbody');
   for (const r of rows) {
@@ -124,6 +129,9 @@ async function boot() {
   status('starting…');
 
   // 1. Everything that needs no async work, wired before anything can be clicked.
+  installHelp();
+  await applyStoredTheme();
+  wireTheme();
   wireTabs();
   wireData();
   wireInvoice();
@@ -178,16 +186,62 @@ async function boot() {
 
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
+/* ─────────────────────────── theme ─────────────────────────── */
+
+/**
+ * Dark is the default because the panel floats over arbitrary pages and a dark
+ * surface reads as an overlay rather than as part of the host. The first run
+ * follows the OS preference; after that the choice is the user's and is kept.
+ */
+async function applyStoredTheme() {
+  let theme = null;
+  try {
+    const { panelTheme } = await chrome.storage.local.get('panelTheme');
+    theme = panelTheme ?? null;
+  } catch { /* storage may be unavailable */ }
+  if (!theme) {
+    theme = window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  setTheme(theme, false);
+}
+
+function setTheme(theme, persist = true) {
+  S.theme = theme === 'light' ? 'light' : 'dark';
+  const root = document.documentElement;
+  root.classList.toggle('light', S.theme === 'light');
+  root.classList.toggle('dark', S.theme === 'dark');
+  const btn = $('btnTheme');
+  if (btn) {
+    btn.textContent = S.theme === 'light' ? '☀' : '◐';
+    btn.title = S.theme === 'light' ? 'Switch to the dark theme' : 'Switch to the light theme';
+  }
+  if (persist) { try { chrome.storage.local.set({ panelTheme: S.theme }); } catch {} }
+}
+
+function wireTheme() {
+  $('btnTheme').onclick = () => {
+    setTheme(S.theme === 'light' ? 'dark' : 'light');
+    // Colours are baked into each chart's option object when it is built, so a
+    // theme change needs a rebuild rather than a repaint.
+    CH.themeChanged();
+    if (S.result) renderAll(); else CH.syncTheme();
+  };
+}
+
 /* ─────────────────────────── tabs ─────────────────────────── */
 
 function wireTabs() {
-  for (const b of document.querySelectorAll('.tab')) {
+  // Only buttons that actually name a pane. The theme button shares the .tab
+  // class for its styling, and binding it here overwrote its own handler with
+  // showTab(undefined), which deactivated every pane and blanked the panel.
+  for (const b of document.querySelectorAll('.tab[data-tab]')) {
     b.onclick = () => showTab(b.dataset.tab);
   }
 }
 
 function showTab(name) {
-  for (const b of document.querySelectorAll('.tab')) b.classList.toggle('tab-active', b.dataset.tab === name);
+  if (!name) return;   // never leave the panel with no active pane
+  for (const b of document.querySelectorAll('.tab[data-tab]')) b.classList.toggle('tab-active', b.dataset.tab === name);
   for (const p of document.querySelectorAll('.pane')) p.classList.toggle('active', p.dataset.pane === name);
   requestAnimationFrame(() => CH.resizeAll());
 }
@@ -284,10 +338,10 @@ function showIngestReport(res) {
   const grid = el('div', 'mt-3 grid gap-3 sm:grid-cols-4');
   const stat = (k, v, s) => { const d = el('div', 'stat'); d.append(el('div', 'stat-k', k), el('div', 'stat-v', String(v)), s ? el('div', 'stat-s', s) : el('span')); return d; };
   grid.append(
-    stat('sheets read', r.sheetsRead, `${r.sheetsRecognised} recognised`),
-    stat('rows', r.totalRows, `${r.tablesPopulated.length} tables`),
-    stat('mapping warnings', r.lowConfidenceMappings.length + r.unmappedColumns.length, 'columns needing a look'),
-    stat('data issues', r.dataIssues.length, r.dataIssues.length ? 'see below' : 'none'),
+    stat(`sheets read${helpMark('sheetsRead')}`, r.sheetsRead, `${r.sheetsRecognised} recognised`),
+    stat(`rows${helpMark('rowsRead')}`, r.totalRows, `${r.tablesPopulated.length} tables`),
+    stat(`mapping warnings${helpMark('mappingWarnings')}`, r.lowConfidenceMappings.length + r.unmappedColumns.length, 'columns needing a look'),
+    stat(`data issues${helpMark('dataIssues')}`, r.dataIssues.length, r.dataIssues.length ? 'see below' : 'none'),
   );
   head.append(grid);
 
@@ -379,6 +433,7 @@ async function run(patch = {}) {
 }
 
 function renderAll() {
+  CH.syncTheme();
   renderWorkingsOptions();
   renderFixing();
   renderBasket();
@@ -401,12 +456,12 @@ function renderFixing() {
   const d = f.diagnostics;
   const stat = (k, v, s, cls = '') => { const n = el('div', 'stat'); n.append(el('div', 'stat-k', k), el('div', `stat-v ${cls}`, v), el('div', 'stat-s', s ?? '')); return n; };
   host.append(
-    stat('internal matrix', f.internalMatrixIsVehicleFree ? 'vehicle-free' : 'pooled',
+    stat(`internal matrix${helpMark('internalMatrix')}`, f.internalMatrixIsVehicleFree ? 'vehicle-free' : 'pooled',
       `${d.internalQuotesUsed ?? '—'} participating quotes${f.external?.length ? ` · ${f.external.join(', ')} attached as satellite` : ''}`,
       f.internalMatrixIsVehicleFree ? 'text-emerald-400' : 'text-amber-400'),
-    stat('quotes accepted', String(d.quotesAccepted), `${d.quotesRejected} rejected on entry, ${d.outliers.length} as outliers`),
-    stat('weighted RMSE', `${fmt(d.weightedRMSEbps, 2)} bps`, 'dispersion of quotes around the fit'),
-    stat('input inconsistency', `${fmt(d.maxRawTriangleInconsistencyBps, 0)} bps`, d.worstTriangle ? `worst: ${d.worstTriangle.slice(0, 3).join('→')}` : 'no triangle to test'),
+    stat(`quotes accepted${helpMark('quotesAccepted')}`, String(d.quotesAccepted), `${d.quotesRejected} rejected on entry, ${d.outliers.length} as outliers`),
+    stat(`weighted RMSE${helpMark('weightedRMSE')}`, `${fmt(d.weightedRMSEbps, 2)} bps`, 'dispersion of quotes around the fit'),
+    stat(`input inconsistency${helpMark('inputInconsistency')}`, `${fmt(d.maxRawTriangleInconsistencyBps, 0)} bps`, d.worstTriangle ? `worst: ${d.worstTriangle.slice(0, 3).join('→')}` : 'no triangle to test'),
   );
 
   // ── BCC-T pivot: the primary quotation ──────────────────────────────
@@ -418,11 +473,11 @@ function renderFixing() {
   } else {
     pvBox.replaceChildren(table([
       { label: 'currency', get: (r) => `<b>${esc(r.code)}</b>` },
-      { label: 'units per BCC-T', num: true, get: (r) => fmt(r.perBCCT, r.perBCCT > 100 ? 4 : 6) },
-      { label: 'BCC-T per unit', num: true, get: (r) => fmt(r.inBCCT, 8) },
-      { label: 'role', get: (r) => `<span class="badge ${r.role.startsWith('participant') ? 'badge-ok' : 'badge-warn'}">${esc(r.role)}</span>` },
+      { label: 'units per BCC-T', help: 'perBCCT', num: true, get: (r) => fmt(r.perBCCT, r.perBCCT > 100 ? 4 : 6) },
+      { label: 'BCC-T per unit', help: 'inBCCT', num: true, get: (r) => fmt(r.inBCCT, 8) },
+      { label: 'role', help: 'satelliteRole', get: (r) => `<span class="badge ${r.role.startsWith('participant') ? 'badge-ok' : 'badge-warn'}">${esc(r.role)}</span>` },
       { label: 'basket weight', num: true, get: (r) => (r.basketWeight === null ? '—' : pctOf(r.basketWeight, 2)) },
-      { label: 'own share of value', num: true, get: (r) => (r.shareOfBasketValue ? pctOf(r.shareOfBasketValue, 2) : '—') },
+      { label: 'own share of value', help: 'ownShare', num: true, get: (r) => (r.shareOfBasketValue ? pctOf(r.shareOfBasketValue, 2) : '—') },
     ], pv.rows));
     pvNote.append(el('div', `note ${pv.reconstruction.lossless ? 'note-ok' : 'note-bad'}`,
       pv.reconstruction.lossless
@@ -483,12 +538,12 @@ function renderBasket() {
   const drift = S.result.drift?.rows || [];
   $('basketTable').replaceChildren(table([
     { label: 'code', get: (r) => `<b>${esc(r.code)}</b>` },
-    { label: 'economic score', num: true, get: (r) => fmt(r.economicScore, 4) },
-    { label: 'raw weight', num: true, get: (r) => pctOf(r.rawWeight, 2) },
-    { label: 'final weight', num: true, get: (r) => `${pctOf(r.finalWeight, 2)}${r.capped ? ' <span class="badge badge-warn">capped</span>' : ''}` },
-    { label: 'fixed quantity', num: true, get: (r) => fmt(r.quantity, 4) },
+    { label: 'economic score', help: 'economicScore', num: true, get: (r) => fmt(r.economicScore, 4) },
+    { label: 'raw weight', help: 'rawWeight', num: true, get: (r) => pctOf(r.rawWeight, 2) },
+    { label: 'final weight', help: 'finalWeight', num: true, get: (r) => `${pctOf(r.finalWeight, 2)}${r.capped ? ' <span class="badge badge-warn">capped</span>' : ''}` },
+    { label: 'fixed quantity', help: 'fixedQuantity', num: true, get: (r) => fmt(r.quantity, 4) },
     { label: 'realised now', num: true, get: (r) => { const d = drift.find((x) => x.code === r.code); return d ? pctOf(d.realisedWeight, 2) : '—'; } },
-    { label: 'drift', num: true, get: (r) => { const d = drift.find((x) => x.code === r.code); return d ? `<span class="${Math.abs(d.driftPp) > 2 ? 'text-amber-400' : 'text-slate-500'}">${d.driftPp >= 0 ? '+' : ''}${fmt(d.driftPp, 2)} pp</span>` : '—'; } },
+    { label: 'drift', help: 'drift', num: true, get: (r) => { const d = drift.find((x) => x.code === r.code); return d ? `<span class="${Math.abs(d.driftPp) > 2 ? 'text-amber-400' : 'text-slate-500'}">${d.driftPp >= 0 ? '+' : ''}${fmt(d.driftPp, 2)} pp</span>` : '—'; } },
   ], b.components));
 
   const sr = $('selfRef');
@@ -565,11 +620,11 @@ function renderDiagTable() {
   });
   $('diagTable').replaceChildren(table([
     { label: 'participant', get: (r) => `<b>${esc(r.participant)}</b>${r.currency ? ` <span class="text-slate-500">${esc(r.currency)}</span>` : ''}` },
-    { label: 'CHS', num: true, get: (r) => (r.health?.chs != null ? fmt(r.health.chs, 1) : '—') },
+    { label: 'CHS', help: 'chs', num: true, get: (r) => (r.health?.chs != null ? fmt(r.health.chs, 1) : '—') },
     // The badge must describe the whole row, not CHS alone. It previously read
     // "100% / high" beside leading and lagging columns computed from 15 of 17
     // indicators, which is exactly the reassurance the user should not get.
-    { label: 'coverage', num: true, get: (r) => {
+    { label: 'coverage', help: 'coverage', num: true, get: (r) => {
       if (!r.health && !r.scored) return '—';
       const parts = [];
       if (r.health) parts.push({ name: 'CHS', cov: r.health.coverage });
@@ -583,13 +638,13 @@ function renderDiagTable() {
       const title = parts.map((p) => `${p.name} ${(p.cov * 100).toFixed(0)}%`).join(' · ');
       return `<span class="badge ${cls}" title="${esc(title)}">${(worst * 100).toFixed(0)}%</span>`;
     } },
-    { label: 'leading', num: true, get: (r) => (r.live?.leading != null ? `<span class="text-sky-400">${fmt(r.live.leading, 1)}</span>` : '—') },
-    { label: 'lagging', num: true, get: (r) => (r.live?.lagging != null ? `<span class="text-violet-400">${fmt(r.live.lagging, 1)}</span>` : '—') },
-    { label: `composite @${S.horizon}d`, num: true, get: (r) => (r.live?.index != null ? `<b>${fmt(r.live.index, 1)}</b>` : '—') },
-    { label: 'divergence', num: true, get: (r) => (r.live?.divergence != null ? `<span class="${r.live.divergence < -12 ? 'text-rose-400' : r.live.divergence > 12 ? 'text-emerald-400' : 'text-slate-400'}">${r.live.divergence >= 0 ? '+' : ''}${fmt(r.live.divergence, 1)}</span>` : '—') },
+    { label: 'leading', help: 'leadingIdx', num: true, get: (r) => (r.live?.leading != null ? `<span class="text-sky-400">${fmt(r.live.leading, 1)}</span>` : '—') },
+    { label: 'lagging', help: 'laggingIdx', num: true, get: (r) => (r.live?.lagging != null ? `<span class="text-violet-400">${fmt(r.live.lagging, 1)}</span>` : '—') },
+    { label: `composite @${S.horizon}d`, help: 'composite', num: true, get: (r) => (r.live?.index != null ? `<b>${fmt(r.live.index, 1)}</b>` : '—') },
+    { label: 'divergence', help: 'divergence', num: true, get: (r) => (r.live?.divergence != null ? `<span class="${r.live.divergence < -12 ? 'text-rose-400' : r.live.divergence > 12 ? 'text-emerald-400' : 'text-slate-400'}">${r.live.divergence >= 0 ? '+' : ''}${fmt(r.live.divergence, 1)}</span>` : '—') },
     { label: 'signal', get: (r) => (r.live ? `<span class="text-[11px] text-slate-400">${esc(r.live.signal.replace(/-/g, ' '))}</span>` : '—') },
-    { label: 'band', get: (r) => bandBadge(r.band.band) },
-    { label: 'CPS', num: true, get: (r) => (r.power?.cps != null ? fmt(r.power.cps, 1) : '—') },
+    { label: 'band', help: 'band', get: (r) => bandBadge(r.band.band) },
+    { label: 'CPS', help: 'cps', num: true, get: (r) => (r.power?.cps != null ? fmt(r.power.cps, 1) : '—') },
   ], rows, { onClick: (r) => showParticipant(r) }));
 }
 
@@ -644,10 +699,10 @@ function renderNetting() {
   }
   const stat = (k, v, s, cls = '') => { const x = el('div', 'stat'); x.append(el('div', 'stat-k', k), el('div', `stat-v ${cls}`, v), el('div', 'stat-s', s ?? '')); return x; };
   host.append(
-    stat('gross obligations', compact(n.grossSettlement), 'before any netting'),
-    stat('after multilateral netting', compact(n.netSettlement), `bilateral only: ${compact(n.bilateralNetSettlement)}`),
-    stat('compression', `${fmt(n.liquiditySavingPercent, 1)}%`, `${fmt(n.multilateralGainOverBilateral, 1)}% better than bilateral`, 'text-cyan-400'),
-    stat('concentration', fmt(n.concentration.herfindahl, 3),
+    stat(`gross obligations${helpMark('grossObligations')}`, compact(n.grossSettlement), 'before any netting'),
+    stat(`after multilateral netting${helpMark('afterNetting')}`, compact(n.netSettlement), `bilateral only: ${compact(n.bilateralNetSettlement)}`),
+    stat(`compression${helpMark('compression')}`, `${fmt(n.liquiditySavingPercent, 1)}%`, `${fmt(n.multilateralGainOverBilateral, 1)}% better than bilateral`, 'text-cyan-400'),
+    stat(`concentration${helpMark('concentration')}`, fmt(n.concentration.herfindahl, 3),
       `${n.concentration.hubRisk.split('—')[0].trim()} · largest creditor ${n.concentration.largestCreditor ?? '—'}`,
       n.concentration.herfindahl > 0.4 ? 'text-rose-400' : n.concentration.herfindahl > 0.25 ? 'text-amber-400' : 'text-emerald-400'),
   );
@@ -663,8 +718,8 @@ function renderNetting() {
       { label: 'sd', num: true, get: (r) => compact(r.sdNetPosition) },
       { label: 'cumulative', num: true, get: (r) => `<span class="${r.cumulativeBalance > 0 ? 'text-emerald-400' : 'text-rose-400'}">${compact(r.cumulativeBalance)}</span>` },
       { label: 'same side', num: true, get: (r) => pctOf(r.sameSideShare, 0) },
-      { label: 'lag-1 autocorr.', num: true, get: (r) => fmt(r.lag1Autocorrelation, 3) },
-      { label: 'classification', get: (r) => `<span class="badge ${r.classification.startsWith('structural creditor') ? 'badge-warn' : r.classification.startsWith('structural debtor') ? 'badge-bad' : ''}">${esc(r.classification)}</span>` },
+      { label: 'lag-1 autocorr.', help: 'lag1', num: true, get: (r) => fmt(r.lag1Autocorrelation, 3) },
+      { label: 'classification', help: 'persistence', get: (r) => `<span class="badge ${r.classification.startsWith('structural creditor') ? 'badge-warn' : r.classification.startsWith('structural debtor') ? 'badge-bad' : ''}">${esc(r.classification)}</span>` },
     ], prog.persistence));
 
     const v = $('nettingVerdict');
@@ -766,16 +821,16 @@ function renderInvoice() {
   const s = book.summary;
   const stat = (k, v, sub, cls = '') => { const n = el('div', 'stat'); n.append(el('div', 'stat-k', k), el('div', `stat-v ${cls}`, v), el('div', 'stat-s', sub ?? '')); return n; };
   host.append(
-    stat('invoices priced', `${s.n}`, s.nFailed ? `${s.nFailed} failed` : 'all succeeded'),
-    stat('book value', `${compact(s.totalInvoiceBCCT)}`, `BCC-T, base ${compact(s.totalBaseBCCT)}`),
-    stat('weighted spread', `${fmt(s.weightedSpreadBps, 0)} bps`, 'over the commercial base'),
+    stat(`invoices priced${helpMark('invoicesPriced')}`, `${s.n}`, s.nFailed ? `${s.nFailed} failed` : 'all succeeded'),
+    stat(`book value${helpMark('bookValue')}`, `${compact(s.totalInvoiceBCCT)}`, `BCC-T, base ${compact(s.totalBaseBCCT)}`),
+    stat(`weighted spread${helpMark('weightedSpread')}`, `${fmt(s.weightedSpreadBps, 0)} bps`, 'over the commercial base'),
     (() => {
       const withDiff = book.priced.filter((p) => !p.error && p.comparison?.differential);
       if (!withDiff.length) return stat('against the dollar route', '—', 'no vehicle currency in the fixing');
       const diffs = withDiff.map((p) => p.comparison.differential.infrastructureDifferenceBps).sort((a, b) => a - b);
       const med = diffs[Math.floor(diffs.length / 2)];
       const wins = withDiff.filter((p) => p.comparison.cheaperInfrastructure === 'BCC-T direct').length;
-      return stat('infrastructure vs the dollar route', `${med >= 0 ? '+' : ''}${fmt(med, 2)} bps`,
+      return stat(`infrastructure vs the dollar route${helpMark('infraVsUsd')}`, `${med >= 0 ? '+' : ''}${fmt(med, 2)} bps`,
         `direct cheaper on ${wins} of ${withDiff.length} · common risk excluded`,
         med >= 0 ? 'text-emerald-400' : 'text-amber-400');
     })(),
@@ -847,11 +902,11 @@ function renderInvoiceDetail() {
         <div class="text-lg tabular-nums text-slate-300">${fmt(inv.base.local, 2)} ${esc(inv.sellerCurrency)}</div>
       </div>
       <div>
-        <div class="stat-k">spread over base</div>
+        <div class="stat-k">spread over base${helpMark('spreadOverBase')}</div>
         <div class="text-lg tabular-nums ${inv.invoicePrice.spreadOverBaseBps > 500 ? 'text-amber-400' : 'text-slate-300'}">${fmt(inv.invoicePrice.spreadOverBaseBps, 1)} bps</div>
       </div>
       <div>
-        <div class="stat-k">one BCC-T</div>
+        <div class="stat-k">one BCC-T${helpMark('oneBcct')}</div>
         <div class="text-lg tabular-nums text-slate-300">${fmt(inv.numeraire.valueInSeller, 4)} ${esc(inv.sellerCurrency)} · ${fmt(inv.numeraire.valueInBuyer, 2)} ${esc(inv.buyerCurrency)}</div>
       </div>
       <div class="flex-1"></div>
@@ -927,7 +982,7 @@ function renderDependency() {
     grid.append(c);
   }
   host.append(grid);
-  host.append(el('div', 'note note-info mt-3', esc(d.honestReading)));
+  host.append(el('div', 'note note-info mt-3', `${esc(d.honestReading)}${helpMark('dependency')}`));
   host.append(el('div', 'hint mt-2', 'The framework writes this as a product of five factors, which reaches zero as soon as any one of them does. The per-dimension count above is the reading that actually tells you where you stand.'));
 }
 
@@ -1181,7 +1236,7 @@ function renderWorkings() {
     const allOk = checks.every((c) => c.reconciles);
     const box = el('div', `note ${allOk ? 'note-ok' : 'note-bad'}`);
     box.innerHTML = allOk
-      ? `<b>Reconciled.</b> ${checks.map((c) => esc(c.what)).join(', ')} — the derivation below reproduces the published figures exactly.`
+      ? `<b>Reconciled.</b>${helpMark('reconciliation')} ${checks.map((c) => esc(c.what)).join(', ')} — the derivation below reproduces the published figures, within the decimal place each was published at.`
       : `<b>Does not reconcile.</b> ` + checks.filter((c) => !c.reconciles).map((c) =>
         `${esc(c.what)}: derived ${fmt(c.recomputed, 6)}, published ${fmt(c.published, 6)} (difference ${fmt(c.absoluteDifference, 8)})`).join('; ') +
         ' — the working and the code disagree, so treat the published figure as unverified.';

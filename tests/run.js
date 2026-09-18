@@ -22,6 +22,7 @@ import { compile } from '../extension/agent/expr.js';
 import { sanitiseDescription } from '../extension/agent/mcp.js';
 import { Agent, truncateResult } from '../extension/agent/agent.js';
 import { explainInvoice, explainBasket, explainFixing, explainIndicator, explainQuoteWeight, toText } from '../extension/core/explain.js';
+import { HELP } from '../extension/panel/help.js';
 import { ToolRegistry } from '../extension/agent/tools.js';
 import { analyze } from '../extension/core/pipeline.js';
 import { ols, normInv, autocorr1 } from '../extension/core/num.js';
@@ -977,6 +978,48 @@ test('the text rendering is complete enough to review offline', () => {
   assert.ok(t.includes('with:'), 'so must the substituted numbers');
   assert.ok(/CHECK/.test(t), 'and the reconciliation verdict');
   assert.ok(t.length > 1500, 'a one-line summary is not a working');
+});
+
+test('reconciliation allows for the precision a figure was published at', () => {
+  // Published figures are rounded for display. Holding a value rounded to three
+  // decimals to a 1e-6 relative tolerance failed it for existing, on two of six
+  // sample trades — and a check that cries wolf teaches the reader to ignore it.
+  for (const p of result.book.priced.filter((x) => !x.error)) {
+    for (const c of explainInvoice(p).checks) {
+      assert.ok(c.reconciles, `${p.tradeId} ${c.what}: derived ${c.recomputed}, published ${c.published}, allowed ${c.allowedDifference}`);
+    }
+  }
+});
+
+test('but a drift larger than the rounding is still caught', () => {
+  const t = structuredClone(workedInvoice);
+  t.invoicePrice.spreadOverBaseBps += 0.01;          // 20x the 3-decimal allowance
+  const c = explainInvoice(t).checks.find((x) => /spread/.test(x.what));
+  assert.equal(c.reconciles, false, `a 0.01 bps drift slipped through an allowance of ${c.allowedDifference}`);
+  assert.ok(c.allowedDifference <= 0.0005 + 1e-12, 'the allowance must be half a unit in the last published place');
+});
+
+/* ── the help registry ────────────────────────────────────────── */
+
+test('every help entry is a usable explanation', () => {
+  for (const [key, entry] of Object.entries(HELP)) {
+    assert.ok(Array.isArray(entry) && entry.length >= 2, `${key} is malformed`);
+    const [title, body, section] = entry;
+    assert.ok(title && title.length >= 3, `${key} has no title`);
+    assert.ok(body && body.length >= 40, `${key} explains too little to be worth a tooltip`);
+    assert.ok(!/^see |^refer to/i.test(body), `${key} defers instead of explaining`);
+    if (section !== undefined) assert.match(section, /^§/, `${key} cites "${section}", which is not a framework section`);
+  }
+});
+
+test('the help registry covers the figures the panel puts a mark on', () => {
+  const src = readFileSync(new URL('../extension/panel/app.js', import.meta.url), 'utf8');
+  const used = [...src.matchAll(/helpMark\('([a-zA-Z0-9_]+)'\)/g), ...src.matchAll(/help: '([a-zA-Z0-9_]+)'/g)]
+    .map((m) => m[1]);
+  assert.ok(used.length >= 25, `only ${used.length} help marks are attached`);
+  for (const key of new Set(used)) {
+    assert.ok(HELP[key], `the panel references help "${key}", which is not in the registry`);
+  }
 });
 
 /* ── report ──────────────────────────────────────────────────── */

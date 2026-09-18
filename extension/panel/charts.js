@@ -7,21 +7,38 @@
  * emerald is a credit to the payer, rose is a charge.
  */
 
+/**
+ * The palette is read from the document's CSS custom properties, so the charts
+ * and the surrounding page are driven by one definition and a theme change
+ * moves both. `C` is a live object refreshed by syncTheme() before each render;
+ * the option builders close over it and therefore need no changes.
+ */
 const C = {
   bg: 'transparent',
-  text: '#cbd5e1',
-  muted: '#64748b',
-  grid: '#1e293b',
-  axis: '#334155',
-  direct: '#22d3ee',
-  usd: '#f59e0b',
-  charge: '#fb7185',
-  credit: '#34d399',
-  base: '#818cf8',
-  lead: '#38bdf8',
-  lag: '#a78bfa',
+  text: '#cbd5e1', muted: '#64748b', grid: '#1e293b', axis: '#334155',
+  direct: '#22d3ee', usd: '#f59e0b', charge: '#fb7185', credit: '#34d399',
+  base: '#818cf8', lead: '#38bdf8', lag: '#a78bfa',
   series: ['#22d3ee', '#818cf8', '#f59e0b', '#34d399', '#fb7185', '#a78bfa', '#facc15', '#2dd4bf'],
 };
+
+const TOKENS = {
+  text: '--text-2', muted: '--muted', grid: '--grid', axis: '--axis',
+  direct: '--accent', usd: '--vehicle', charge: '--charge', credit: '--credit',
+  base: '--base', lead: '--lead', lag: '--lag',
+};
+
+/** Pull the current theme's colours into C. Cheap; called before every render. */
+export function syncTheme() {
+  if (typeof getComputedStyle !== 'function') return C;
+  const cs = getComputedStyle(document.documentElement);
+  for (const [key, varName] of Object.entries(TOKENS)) {
+    const v = cs.getPropertyValue(varName).trim();
+    if (v) C[key] = v;
+  }
+  C.series = [C.direct, C.base, C.usd, C.credit, C.charge, C.lag,
+    (cs.getPropertyValue('--vehicle').trim() || '#facc15'), C.lead];
+  return C;
+}
 
 const fmtNum = (v, d = 2) => (Number.isFinite(v) ? v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : '—');
 const compact = (v) => (Number.isFinite(v) ? Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 }).format(v) : '—');
@@ -39,7 +56,7 @@ const axis = (name, opts = {}) => ({
   name, nameTextStyle: { color: C.muted, fontSize: 10, padding: [0, 0, 0, 0] },
   axisLine: { lineStyle: { color: C.axis } },
   axisTick: { show: false },
-  axisLabel: { color: C.muted, fontSize: 10 },
+  axisLabel: { color: C.text, fontSize: 10 },
   splitLine: { lineStyle: { color: C.grid, type: 'dashed' } },
   ...opts,
 });
@@ -69,20 +86,20 @@ export function fxMatrix(fixing) {
     yAxis: { type: 'category', data: cs, inverse: true, axisLabel: { color: C.text, fontSize: 11 }, axisLine: { lineStyle: { color: C.axis } } },
     visualMap: {
       min: Math.min(...logs), max: Math.max(...logs), show: false,
-      inRange: { color: ['#0e7490', '#0f172a', '#7c3aed'] },
+      inRange: { color: isLight() ? ['#cffafe', '#f1f5f9', '#ddd6fe'] : ['#0e7490', '#0f172a', '#7c3aed'] },
     },
     series: [{
       type: 'heatmap',
       data: data.map((d) => [d[0], d[1], d[2] === null ? null : Math.log10(d[2])]),
       label: {
-        show: cs.length <= 7, fontSize: 9.5, color: '#e2e8f0',
+        show: cs.length <= 7, fontSize: 9.5, color: isLight() ? '#0f172a' : '#e2e8f0',
         formatter: (p) => {
           const v = fixing.rate(cs[p.data[1]], cs[p.data[0]]);
           if (!Number.isFinite(v)) return '';
           return v === 1 ? '1' : v >= 1000 ? compact(v) : v >= 1 ? v.toFixed(2) : v.toFixed(4);
         },
       },
-      itemStyle: { borderColor: '#0b1020', borderWidth: 1 },
+      itemStyle: { borderColor: isLight() ? '#ffffff' : '#0b1020', borderWidth: 1 },
     }],
     title: { text: 'rows buy columns · log colour scale', left: 'center', bottom: 4, textStyle: { color: C.muted, fontSize: 10, fontWeight: 'normal' } },
   });
@@ -118,12 +135,12 @@ export function residuals(fixing) {
 export function basketWeights(basket) {
   const c = basket.components;
   return base({
-    legend: { data: ['raw economic weight', 'capped weight'], textStyle: { color: C.muted, fontSize: 10 }, top: 2 },
+    legend: { data: ['raw economic weight', 'capped weight'], textStyle: { color: C.text, fontSize: 10 }, top: 2 },
     tooltip: { trigger: 'axis', className: 'echarts-tooltip-dark', borderWidth: 0, valueFormatter: (v) => `${fmtNum(v, 2)}%` },
     xAxis: axis('', { type: 'category', data: c.map((x) => x.code), axisLabel: { color: C.text, fontSize: 11 } }),
     yAxis: axis('weight (%)', { type: 'value' }),
     series: [
-      { name: 'raw economic weight', type: 'bar', data: c.map((x) => +(x.rawWeight * 100).toFixed(3)), itemStyle: { color: '#475569' }, barGap: '-55%', barMaxWidth: 36 },
+      { name: 'raw economic weight', type: 'bar', data: c.map((x) => +(x.rawWeight * 100).toFixed(3)), itemStyle: { color: C.muted }, barGap: '-55%', barMaxWidth: 36 },
       {
         name: 'capped weight', type: 'bar', barMaxWidth: 22,
         data: c.map((x) => ({ value: +(x.finalWeight * 100).toFixed(3), itemStyle: { color: x.capped ? C.usd : C.direct } })),
@@ -184,8 +201,8 @@ export function divergence(diagnostics) {
     // fundamentals do not yet show. Said once, in the corner, rather than
     // painted across the plot.
     graphic: [
-      { type: 'text', right: 30, top: '62%', silent: true, style: { text: 'below the line:\nmarkets ahead, to the downside', fill: '#64748b', fontSize: 9.5, lineHeight: 12, textAlign: 'right' } },
-      { type: 'text', left: 76, top: 28, silent: true, style: { text: 'above the line:\nfundamentals lag the improvement', fill: '#64748b', fontSize: 9.5, lineHeight: 12 } },
+      { type: 'text', right: 30, top: '62%', silent: true, style: { text: 'below the line:\nmarkets ahead, to the downside', fill: C.muted, fontSize: 9.5, lineHeight: 12, textAlign: 'right' } },
+      { type: 'text', left: 76, top: 28, silent: true, style: { text: 'above the line:\nfundamentals lag the improvement', fill: C.muted, fontSize: 9.5, lineHeight: 12 } },
     ],
   });
 }
@@ -200,14 +217,14 @@ export function healthRadar(diagnostics) {
   ];
   return base({
     grid: undefined,
-    legend: { data: rows.map((r) => r.participant), textStyle: { color: C.muted, fontSize: 10 }, top: 2, type: 'scroll' },
+    legend: { data: rows.map((r) => r.participant), textStyle: { color: C.text, fontSize: 10 }, top: 2, type: 'scroll' },
     tooltip: { className: 'echarts-tooltip-dark', borderWidth: 0 },
     radar: {
       indicator: dims.map(([, label]) => ({ name: label, max: 100 })),
       radius: '64%', center: ['50%', '56%'],
-      axisName: { color: C.muted, fontSize: 10 },
+      axisName: { color: C.text, fontSize: 10 },
       splitLine: { lineStyle: { color: C.grid } },
-      splitArea: { areaStyle: { color: ['rgba(30,41,59,.25)', 'transparent'] } },
+      splitArea: { areaStyle: { color: [isLight() ? 'rgba(241,245,249,.7)' : 'rgba(30,41,59,.25)', 'transparent'] } },
       axisLine: { lineStyle: { color: C.grid } },
     },
     series: [{
@@ -256,9 +273,9 @@ export function excessUsage(model) {
           return {
             type: 'group',
             children: [
-              { type: 'line', shape: { x1: x, y1: hi, x2: x, y2: lo }, style: { stroke: C.text, lineWidth: 1 } },
-              { type: 'line', shape: { x1: x - 6, y1: hi, x2: x + 6, y2: hi }, style: { stroke: C.text, lineWidth: 1 } },
-              { type: 'line', shape: { x1: x - 6, y1: lo, x2: x + 6, y2: lo }, style: { stroke: C.text, lineWidth: 1 } },
+              { type: 'line', shape: { x1: x, y1: hi, x2: x, y2: lo }, style: { stroke: C.muted, lineWidth: 1 } },
+              { type: 'line', shape: { x1: x - 6, y1: hi, x2: x + 6, y2: hi }, style: { stroke: C.muted, lineWidth: 1 } },
+              { type: 'line', shape: { x1: x - 6, y1: lo, x2: x + 6, y2: lo }, style: { stroke: C.muted, lineWidth: 1 } },
             ],
           };
         },
@@ -273,13 +290,13 @@ export function excessUsage(model) {
 export function nettingBars(periods) {
   const p = periods;
   return base({
-    legend: { data: ['gross', 'bilaterally netted', 'multilaterally netted'], textStyle: { color: C.muted, fontSize: 10 }, top: 2, type: 'scroll' },
+    legend: { data: ['gross', 'bilaterally netted', 'multilaterally netted'], textStyle: { color: C.text, fontSize: 10 }, top: 2, type: 'scroll' },
     tooltip: { trigger: 'axis', className: 'echarts-tooltip-dark', borderWidth: 0, valueFormatter: (v) => compact(v) },
     xAxis: axis('', { type: 'category', data: p.map((x) => x.period ?? 'period'), axisLabel: { color: C.muted, fontSize: 9, rotate: p.length > 8 ? 45 : 0 } }),
     yAxis: [axis('BCC-T', { type: 'value', axisLabel: { color: C.muted, fontSize: 10, formatter: compact } }),
       axis('compression (%)', { type: 'value', min: 0, max: 100, position: 'right', splitLine: { show: false } })],
     series: [
-      { name: 'gross', type: 'bar', data: p.map((x) => x.grossSettlement), itemStyle: { color: '#475569' }, barMaxWidth: 26 },
+      { name: 'gross', type: 'bar', data: p.map((x) => x.grossSettlement), itemStyle: { color: C.faint || C.muted }, barMaxWidth: 26 },
       { name: 'bilaterally netted', type: 'bar', data: p.map((x) => x.bilateralNetSettlement), itemStyle: { color: C.base }, barMaxWidth: 26 },
       { name: 'multilaterally netted', type: 'bar', data: p.map((x) => x.netSettlement), itemStyle: { color: C.direct }, barMaxWidth: 26 },
       { name: 'compression', type: 'line', yAxisIndex: 1, data: p.map((x) => x.liquiditySavingPercent), lineStyle: { color: C.credit, width: 2 }, itemStyle: { color: C.credit }, symbolSize: 5 },
@@ -289,7 +306,7 @@ export function nettingBars(periods) {
 
 export function netPositions(persistence) {
   return base({
-    legend: { data: persistence.map((p) => p.participant), textStyle: { color: C.muted, fontSize: 10 }, top: 2, type: 'scroll' },
+    legend: { data: persistence.map((p) => p.participant), textStyle: { color: C.text, fontSize: 10 }, top: 2, type: 'scroll' },
     tooltip: { trigger: 'axis', className: 'echarts-tooltip-dark', borderWidth: 0, valueFormatter: (v) => compact(v) },
     xAxis: axis('period', { type: 'category', data: persistence[0]?.series.map((_, i) => i + 1) ?? [] }),
     yAxis: axis('net position (BCC-T)', { type: 'value', axisLabel: { color: C.muted, fontSize: 10, formatter: compact } }),
@@ -411,7 +428,7 @@ export function routeCompare(invoice) {
 
   return base({
     grid: { left: 8, right: 30, top: 34, bottom: 44, containLabel: true },
-    legend: { data: ['BCC-T direct', `via ${invoice.usdRoute.vehicle || 'USD'}`], textStyle: { color: C.muted, fontSize: 10 }, top: 2 },
+    legend: { data: ['BCC-T direct', `via ${invoice.usdRoute.vehicle || 'USD'}`], textStyle: { color: C.text, fontSize: 10 }, top: 2 },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' }, className: 'echarts-tooltip-dark', borderWidth: 0,
       valueFormatter: (v) => `${fmtNum(v, 2)} bps`,
@@ -426,7 +443,7 @@ export function routeCompare(invoice) {
       type: 'text', left: 'center', bottom: 4, silent: true,
       style: {
         text: `direct ${d.directInfrastructureBps.toFixed(2)} bps   ·   via ${invoice.usdRoute.vehicle || 'USD'} ${d.usdInfrastructureBps.toFixed(2)} bps   ·   common to both ${d.commonToBothBps.toFixed(0)} bps (excluded)`,
-        fill: '#64748b', fontSize: 10,
+        fill: C.muted, fontSize: 10,
       },
     }],
   });
@@ -435,7 +452,7 @@ export function routeCompare(invoice) {
 export function sensitivity(grid) {
   return base({
     grid: { left: 60, right: 24, top: 28, bottom: 40, containLabel: true },
-    legend: { data: grid.series.map((s) => s.name), textStyle: { color: C.muted, fontSize: 10 }, top: 2 },
+    legend: { data: grid.series.map((s) => s.name), textStyle: { color: C.text, fontSize: 10 }, top: 2 },
     tooltip: { trigger: 'axis', className: 'echarts-tooltip-dark', borderWidth: 0, valueFormatter: (v) => `${fmtNum(v, 1)} bps` },
     xAxis: axis('settlement days', { type: 'category', data: grid.days }),
     yAxis: axis('spread over base (bps)', { type: 'value' }),
@@ -518,6 +535,7 @@ function shortLabel(s) {
 
 const instances = new Map();
 const observers = new Map();
+const lastOptions = new Map();
 
 /**
  * A chart created while its tab is hidden has a zero-width container, and
@@ -539,6 +557,8 @@ function observe(elId, el, inst) {
   observers.set(elId, ro);
 }
 
+const isLight = () => typeof document !== 'undefined' && document.documentElement.classList.contains('light');
+
 export function render(elId, option) {
   const el = document.getElementById(elId);
   if (!el) return null;
@@ -557,11 +577,29 @@ export function render(elId, option) {
     instances.set(elId, inst);
     observe(elId, el, inst);
   }
+  lastOptions.set(elId, option);
   inst.setOption(option, true);
   // If the container already has a size, take it now rather than waiting for
   // the observer's first asynchronous callback.
   if (el.clientWidth > 0 && el.clientHeight > 0) inst.resize();
   return inst;
+}
+
+/**
+ * Rebuild every chart after a theme change. Colours are baked into the option
+ * objects when they are built, so re-running setOption with the old option
+ * would keep the old palette — the caller must supply fresh options, which is
+ * what asking the app to re-render does. This disposes so nothing is stale.
+ */
+export function themeChanged() {
+  syncTheme();
+  for (const [id, inst] of instances) {
+    if (!inst.isDisposed?.()) inst.dispose();
+    instances.delete(id);
+    observers.get(id)?.disconnect();
+    observers.delete(id);
+  }
+  lastOptions.clear();
 }
 
 export function resizeAll() {

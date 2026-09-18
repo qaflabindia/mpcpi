@@ -200,6 +200,17 @@ the reasons are worth stating because they are the failure modes this kind of mo
 - `boot()` awaited the SQLite WASM init before attaching any handler, so every click during startup
   landed on an inert button and vanished. Handlers are now attached first and the gated buttons are
   visibly disabled until ready.
+- The reconciliation in the Workings tab compared a full-precision derivation against a figure
+  **rounded for display**, using a relative tolerance far tighter than the rounding. Two of six sample
+  invoices reported `DOES NOT RECONCILE` for existing. The check now allows half a unit in the last
+  published decimal place — and still catches a drift twenty times smaller than the one it missed.
+- The theme button carried `class="tab"`, and `wireTabs()` bound every `.tab`, overwriting its handler
+  with `showTab(undefined)` — which deactivated every pane and **blanked the panel**. Tab wiring is
+  now scoped to buttons that actually name a pane.
+- The component layer was written with `@apply bg-slate-900`, which inlines the declaration so the
+  element never carries the class. Light-theme overrides written against those class names therefore
+  matched nothing and the panel stayed dark-on-light. Components now take their colours from the
+  theme variables directly.
 
 Correcting only those three would have flipped the book to 6/6 the other way, which was equally
 suspicious. Two further errors turned out to favour the framework:
@@ -211,6 +222,18 @@ suspicious. Two further errors turned out to favour the framework:
 
 All five are now covered by regression tests, and those tests were mutation-checked: each one fails
 when the old behaviour is restored.
+
+## Themes and tooltips
+
+A **◐ toggle** in the tab strip switches between dark and light; the first run follows the OS
+preference and the choice is then remembered. Colours are defined once as CSS custom properties and
+read by both the stylesheet and `charts.js`, so the charts re-theme with the page rather than staying
+dark on a light surface.
+
+Every stat card and table column carries an **ⓘ** explaining what the figure is, how it was derived
+and which section of the framework it comes from — 45 entries, 35 of them citing a section. The text
+lives in one registry (`panel/help.js`) rather than scattered through the markup, so it can be
+reviewed as a body of writing and tested for completeness.
 
 ## Showing the working
 
@@ -303,7 +326,7 @@ before a model ever sees it, and the agent's system prompt states the rule.
 ## Development
 
 ```bash
-npm test                  # 113 assertions over the computational core
+npm test                  # 117 assertions over the computational core
 npm run check:all         # secrets scan + reference lint + tests
 node tools/check-secrets.mjs   # refuses to ship a file containing a credential
 node tools/lint-extension.js   # manifest paths, imports, MV3 CSP constraints

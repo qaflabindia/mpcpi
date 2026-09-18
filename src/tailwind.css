@@ -2,67 +2,88 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Component classes take their COLOURS from the theme variables defined in
+ * panel.css, and use @apply only for layout, spacing and typography.
+ *
+ * The earlier version applied slate utilities here. Because @apply inlines the
+ * declaration, the element never carries the utility class, so a light theme
+ * written as `html.light .bg-slate-900 { … }` matched nothing and the panel
+ * stayed dark-on-light. Driving colour from variables means one definition
+ * serves both themes, the charts read the same variables, and there are no
+ * !important overrides to keep in step.
+ */
+
 @layer components {
   .tab {
     @apply relative shrink-0 rounded-t-md border-b-2 border-transparent px-3 py-2 text-[12.5px] font-medium
-           text-slate-400 transition-colors hover:text-slate-200 focus-visible:outline focus-visible:outline-2
-           focus-visible:outline-cyan-400;
+           transition-colors focus-visible:outline focus-visible:outline-2;
+    color: var(--muted);
+    outline-color: var(--accent);
   }
-  .tab-active { @apply border-cyan-400 text-slate-100; }
-  .tab-primary { @apply text-cyan-300; }
-  .sect { @apply ml-1 align-super text-[9px] font-normal text-slate-600; }
+  .tab:hover { color: var(--text); }
+  .tab-active { border-bottom-color: var(--accent); color: var(--text); }
+  .tab-primary { color: var(--accent); }
+  .sect { @apply ml-1 align-super text-[9px] font-normal; color: var(--faint); }
 
   .pane { @apply hidden min-h-0 flex-1 overflow-y-auto; }
   .pane.active { @apply block; }
   .pane.active.flex-col { @apply flex; }
 
-  .card { @apply rounded-xl border border-slate-800 bg-slate-900/50 p-4; }
-  .card-h { @apply text-[13px] font-semibold text-slate-200; }
-  .hint { @apply text-[11.5px] leading-relaxed text-slate-500; }
+  .card { @apply rounded-xl p-4; background: var(--surface); border: 1px solid var(--border); }
+  .card-h { @apply text-[13px] font-semibold; color: var(--text); }
+  .hint { @apply text-[11.5px] leading-relaxed; color: var(--muted); }
 
-  .sec-head h2 { @apply text-lg font-semibold text-slate-100; }
-  .sec-head p  { @apply mt-1 max-w-3xl text-[12.5px] leading-relaxed text-slate-400; }
+  .sec-head h2 { @apply text-lg font-semibold; color: var(--text); }
+  .sec-head p  { @apply mt-1 max-w-3xl text-[12.5px] leading-relaxed; color: var(--muted); }
 
   .inp {
-    @apply w-full rounded-md border border-slate-700 bg-slate-800/70 px-2.5 py-1.5 text-[12.5px] text-slate-100
-           placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/40;
+    @apply w-full rounded-md px-2.5 py-1.5 text-[12.5px] focus:outline-none;
+    background: var(--surface-2); border: 1px solid var(--border-2); color: var(--text);
   }
+  .inp::placeholder { color: var(--faint); }
+  .inp:focus { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
 
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5
-           text-[12.5px] font-medium text-slate-200 transition-colors hover:bg-slate-700
-           focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium
+           transition-colors focus-visible:outline focus-visible:outline-2
            disabled:cursor-not-allowed disabled:opacity-40;
+    background: var(--surface-2); border: 1px solid var(--border-2); color: var(--text-2);
+    outline-color: var(--accent);
   }
-  .btn-primary { @apply border-cyan-600/50 bg-cyan-600/90 text-white hover:bg-cyan-500; }
-  .btn-danger  { @apply border-rose-700/50 bg-rose-900/50 text-rose-200 hover:bg-rose-800/60; }
-  .btn-sm      { @apply px-2 py-1 text-[11.5px]; }
+  .btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+  .btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, #000); }
+  .btn-danger { background: color-mix(in srgb, var(--charge) 16%, var(--surface-2)); border-color: var(--charge); color: var(--charge); }
+  .btn-sm { @apply px-2 py-1 text-[11.5px]; }
 
-  .badge { @apply inline-flex items-center rounded-md bg-slate-800 px-1.5 py-0.5 text-[11px] font-medium text-slate-300; }
-  .badge-ok    { @apply bg-emerald-900/50 text-emerald-300; }
-  .badge-warn  { @apply bg-amber-900/50 text-amber-300; }
-  .badge-bad   { @apply bg-rose-900/50 text-rose-300; }
-  .badge-info  { @apply bg-cyan-900/40 text-cyan-300; }
+  .badge { @apply inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium;
+           background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--text-2); }
+  .badge-ok   { background: color-mix(in srgb, var(--credit) 18%, transparent); color: var(--credit); }
+  .badge-warn { background: color-mix(in srgb, var(--vehicle) 18%, transparent); color: var(--vehicle); }
+  .badge-bad  { background: color-mix(in srgb, var(--charge) 18%, transparent); color: var(--charge); }
+  .badge-info { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 
-  .stat   { @apply rounded-xl border border-slate-800 bg-slate-900/50 p-3; }
-  .stat-v { @apply mt-0.5 text-xl font-semibold tabular-nums text-slate-100; }
-  .stat-k { @apply text-[11px] uppercase tracking-wide text-slate-500; }
-  .stat-s { @apply mt-0.5 text-[11px] text-slate-500; }
+  .stat   { @apply rounded-xl p-3; background: var(--surface); border: 1px solid var(--border); }
+  .stat-v { @apply mt-0.5 text-xl font-semibold tabular-nums; color: var(--text); }
+  .stat-k { @apply text-[11px] uppercase tracking-wide; color: var(--muted); }
+  .stat-s { @apply mt-0.5 text-[11px]; color: var(--muted); }
 
   .tbl        { @apply w-full min-w-full border-collapse text-[12px]; }
-  .tbl th     { @apply sticky top-0 z-10 whitespace-nowrap border-b border-slate-700 bg-slate-900 px-2.5 py-1.5 text-left font-semibold text-slate-400; }
-  .tbl td     { @apply whitespace-nowrap border-b border-slate-800/70 px-2.5 py-1.5 text-slate-300; }
-  .tbl tr:hover td { @apply bg-slate-800/40; }
+  .tbl th     { @apply sticky top-0 z-10 whitespace-nowrap px-2.5 py-1.5 text-left font-semibold;
+                background: var(--surface-2); color: var(--muted); border-bottom: 1px solid var(--border-2); }
+  .tbl td     { @apply whitespace-nowrap px-2.5 py-1.5; color: var(--text-2); border-bottom: 1px solid var(--border); }
+  .tbl tr:hover td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
   .num        { @apply text-right tabular-nums; }
 
-  .note      { @apply rounded-lg border-l-2 px-3 py-2 text-[12px] leading-relaxed; }
-  .note-warn { @apply border-amber-500 bg-amber-950/30 text-amber-200; }
-  .note-bad  { @apply border-rose-500 bg-rose-950/30 text-rose-200; }
-  .note-ok   { @apply border-emerald-500 bg-emerald-950/30 text-emerald-200; }
-  .note-info { @apply border-cyan-500 bg-cyan-950/25 text-cyan-100; }
+  .note      { @apply rounded-lg px-3 py-2 text-[12px] leading-relaxed; border-left: 2px solid; }
+  .note-warn { border-color: var(--vehicle); background: color-mix(in srgb, var(--vehicle) 10%, transparent); color: var(--vehicle); }
+  .note-bad  { border-color: var(--charge);  background: color-mix(in srgb, var(--charge) 10%, transparent);  color: var(--charge); }
+  .note-ok   { border-color: var(--credit);  background: color-mix(in srgb, var(--credit) 10%, transparent);  color: var(--credit); }
+  .note-info { border-color: var(--accent);  background: color-mix(in srgb, var(--accent) 9%, transparent);   color: var(--text-2); }
 
   .msg      { @apply max-w-none rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed; }
-  .msg-user { @apply ml-auto max-w-[80%] bg-cyan-900/40 text-cyan-50; }
-  .msg-bot  { @apply mr-auto max-w-[92%] border border-slate-800 bg-slate-900/70 text-slate-200; }
-  .msg-tool { @apply mr-auto max-w-[92%] border border-slate-800/60 bg-slate-900/40 font-mono text-[11px] text-slate-400; }
+  .msg-user { @apply ml-auto max-w-[80%]; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); }
+  .msg-bot  { @apply mr-auto max-w-[92%]; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); }
+  .msg-tool { @apply mr-auto max-w-[92%] font-mono text-[11px]; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
 }

@@ -33,18 +33,40 @@ const fmt = (v, d = 6) => {
 const step = (n, title, { section = null, formula = null, substitution = null, result = null, unit = null, note = null, rows = null }) =>
   ({ n, title, section, formula, substitution, result, unit, note, rows });
 
-/** Compare a recomputed value against what the pipeline published. */
-function reconcile(recomputed, published, tolerance = 1e-6) {
+/**
+ * Compare a recomputed value against what the pipeline published.
+ *
+ * The published figure is ROUNDED for display, and the derivation is not, so the
+ * tolerance has to admit half a unit in the published value's last decimal
+ * place. Holding a figure rounded to three decimals to a 1e-6 relative
+ * tolerance fails it for existing — which is what happened here, on two of six
+ * sample trades, and a check that cries wolf is worse than no check because it
+ * teaches the reader to ignore it.
+ *
+ * @param {Object} opts {decimals} the precision the value was published at, or
+ *   {tolerance} an explicit relative tolerance for unrounded figures.
+ */
+function reconcile(recomputed, published, opts = {}) {
   if (!Number.isFinite(recomputed) || !Number.isFinite(published)) {
     return { reconciles: recomputed === published, recomputed, published, note: 'non-numeric comparison' };
   }
-  const scale = Math.max(1, Math.abs(published));
+  const { decimals = null, tolerance = 1e-9 } = typeof opts === 'number' ? { tolerance: opts } : opts;
   const diff = Math.abs(recomputed - published);
+  const scale = Math.max(1, Math.abs(published));
+
+  // Half a unit in the last published place, plus headroom for float noise that
+  // accumulates over a long chain of additions.
+  const roundingAllowance = decimals === null ? 0 : 0.5 * 10 ** -decimals;
+  const floatAllowance = scale * tolerance;
+  const allowed = Math.max(roundingAllowance, floatAllowance);
+
   return {
-    reconciles: diff / scale <= tolerance,
+    reconciles: diff <= allowed,
     recomputed, published,
     absoluteDifference: diff,
     relativeDifference: diff / scale,
+    allowedDifference: allowed,
+    publishedAtDecimals: decimals,
   };
 }
 
@@ -92,7 +114,7 @@ export function explainQuoteWeight(quote, policy = DEFAULT_WEIGHT_POLICY, nowMs 
   return {
     title: `Weight of the ${quote.base}/${quote.quote} quote at ${fmt(num(quote.rate, NaN), 6)}`,
     steps,
-    check: reconcile(recomputed, w.w),
+    check: reconcile(recomputed, w.w, { tolerance: 1e-12 }),
   };
 }
 
@@ -158,7 +180,7 @@ export function explainFixing(fixing, pair = null) {
         result: Math.exp(pa - pb),
         unit: `${b} per ${a}`,
       }));
-      check = reconcile(Math.exp(pa - pb), fixing.rate(a, b));
+      check = reconcile(Math.exp(pa - pb), fixing.rate(a, b), { tolerance: 1e-12 });
     }
   }
   return { title: 'Multilateral FX fixing', steps, check };
@@ -220,7 +242,7 @@ export function explainBasket(basket, fixing) {
       substitution: terms.join(' + '),
       result: v, unit: K,
     }));
-    check = reconcile(v, basket.baseValue, 1e-6);
+    check = reconcile(v, basket.baseValue, { tolerance: 1e-9 });
     check.note = `Equals the base value ${basket.baseValue} when valued in the anchor at the base-date fixing.`;
   }
   return { title: 'BCC-T constitution', steps, check };
@@ -264,7 +286,7 @@ export function explainIndicator(key, rawValue) {
         note: 'One reference standard deviation moves the score ten points, so a five-sigma reading saturates rather than dominating a composite.',
       }),
     ],
-    check: reconcile(clamp(raw, 0, 100), scored.score),
+    check: reconcile(clamp(raw, 0, 100), scored.score, { decimals: 4 }),
   };
 }
 
@@ -375,11 +397,12 @@ export function explainInvoice(invoice, ctx = {}) {
   return {
     title: `Invoice ${invoice.tradeId}: ${invoice.sellerCurrency} → ${invoice.buyerCurrency}, T+${invoice.settlementDays}`,
     steps,
-    check: reconcile(sum, invoice.invoicePrice.bcct),
+    check: reconcile(sum, invoice.invoicePrice.bcct, { decimals: 6 }),
     checks: [
-      { what: 'components sum to the published price', ...reconcile(sum, invoice.invoicePrice.bcct) },
-      { what: 'buyer-currency restatement', ...reconcile(sum * invoice.numeraire.valueInBuyer, invoice.invoicePrice.inBuyerCurrency, 1e-6) },
-      { what: 'spread over base', ...reconcile(((sum - base) / base) * 1e4, invoice.invoicePrice.spreadOverBaseBps, 1e-6) },
+      // The decimals each figure is published at, from invoice.js.
+      { what: 'components sum to the published price', ...reconcile(sum, invoice.invoicePrice.bcct, { decimals: 6 }) },
+      { what: 'buyer-currency restatement', ...reconcile(sum * invoice.numeraire.valueInBuyer, invoice.invoicePrice.inBuyerCurrency, { decimals: 4 }) },
+      { what: 'spread over base', ...reconcile(((sum - base) / base) * 1e4, invoice.invoicePrice.spreadOverBaseBps, { decimals: 3 }) },
     ],
   };
 }
@@ -402,7 +425,7 @@ export function toText(derivation) {
   for (const c of derivation.checks ?? (derivation.check ? [{ what: 'result', ...derivation.check }] : [])) {
     out.push(c.reconciles
       ? `CHECK  ${c.what}: reconciles with the published value (${fmt(c.published, 6)})`
-      : `CHECK  ${c.what}: DOES NOT RECONCILE — derived ${fmt(c.recomputed, 6)}, published ${fmt(c.published, 6)}, difference ${fmt(c.absoluteDifference, 8)}`);
+      : `CHECK  ${c.what}: DOES NOT RECONCILE — derived ${fmt(c.recomputed, 8)}, published ${fmt(c.published, 8)}, difference ${fmt(c.absoluteDifference, 10)} (allowed ${fmt(c.allowedDifference, 10)})`);
   }
   return out.join('\n');
 }
