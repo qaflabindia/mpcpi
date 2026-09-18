@@ -65,6 +65,7 @@ No API key is needed for any of the arithmetic. A model provider is required onl
 | **Diagnostics** | §10–§16 | Leading against lagging, with a horizon slider; the excess-usage regression with standard errors |
 | **Netting** | §19, §20, §27 | Compression *and* the creditor persistence that actually decides whether the design works |
 | **Invoice** | §23–§25, §37 | The line-by-line price, and the honest comparison against the dollar route |
+| **Workings** | all | Every figure derived again step by step — formula, substituted numbers, result — and reconciled against what was published |
 | **Agent** | — | Provider-agnostic analyst that reads results through tools rather than computing them |
 
 ## The invoice price
@@ -192,6 +193,13 @@ the reasons are worth stating because they are the failure modes this kind of mo
 - The sample workbook carried a hard-coded quote timestamp that aged past the §9 staleness window,
   so **"Load sample data" produced nothing at all**. The staleness rule now anchors to the newest
   quote in the file, which is what a fixing window means.
+- `results.map(truncateResult)` handed the callback `(element, index, array)`, so the optional
+  `maxChars` became the array index and every tool result after the first was sliced to a couple of
+  characters — the model saw `""`, then `"["`, then `"{\""`. The agent correctly reported the tools
+  as broken and could not see why.
+- `boot()` awaited the SQLite WASM init before attaching any handler, so every click during startup
+  landed on an inert button and vanished. Handlers are now attached first and the gated buttons are
+  visibly disabled until ready.
 
 Correcting only those three would have flipped the book to 6/6 the other way, which was equally
 suspicious. Two further errors turned out to favour the framework:
@@ -203,6 +211,34 @@ suspicious. Two further errors turned out to favour the framework:
 
 All five are now covered by regression tests, and those tests were mutation-checked: each one fails
 when the old behaviour is restored.
+
+## Showing the working
+
+A tool that asserts traceability owes you the arithmetic. The **Workings** tab derives every
+published figure a second time and shows it as numbered steps:
+
+```
+ 7. Counterparty credit at the CCP        [§25]
+      formula:  charge = base × PD(band, T) × LGD
+      with:     407,428.19 × 0.00061644 × 0.35   [band B, PD 0.005/yr × 45/365]
+      =         87.904028 BCC-T
+
+10. Netting rebate                        [§19]
+      formula:  rebate = − base × efficiency × passThrough × liquidityRate × settlementCycle/basis
+      with:     − 407,428.19 × 0.7266 × 0.5 × 0.045 × 2/360
+      =         −37.002628 BCC-T
+      note:     Over the settlement CYCLE, not the credit period.
+```
+
+Available for the invoice build-up, the FX fixing (including a worked `exp(p_i − p_j)` for any pair),
+the basket constitution, any indicator's winsorise → standardise → map chain, and any single quote's
+weight. Copy as text or download it for review.
+
+**The derivations are checked, not narrated.** Each chain recomputes its result from the recorded
+inputs and compares it against what the tool actually published; a mismatch is reported as
+`DOES NOT RECONCILE` with the difference, rather than reading plausibly. That property is itself
+tested — tamper with a published price, or with one component, or with a basket quantity, and the
+corresponding check fails. An explanation that cannot be wrong is not evidence of anything.
 
 ## Architecture
 
@@ -218,6 +254,7 @@ extension/
     risk.js         §22 waterfall, §24 wrong-way haircuts, §25 supervisory bands
     invoice.js      the price, plus the USD route and §28 adoption cost
     pipeline.js     orchestration
+    explain.js      step-by-step derivations, reconciled against the published figures
     ingest.js       xlsx/csv/Sheets → canonical tables + a validation report
     schema.js       the workbook contract and its header aliases
     db.js           SQLite (sql.js) over IndexedDB, exportable as a .sqlite file
@@ -266,7 +303,7 @@ before a model ever sees it, and the agent's system prompt states the rule.
 ## Development
 
 ```bash
-npm test                  # 91 assertions over the computational core
+npm test                  # 113 assertions over the computational core
 npm run check:all         # secrets scan + reference lint + tests
 node tools/check-secrets.mjs   # refuses to ship a file containing a credential
 node tools/lint-extension.js   # manifest paths, imports, MV3 CSP constraints

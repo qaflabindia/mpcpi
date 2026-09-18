@@ -21,6 +21,7 @@ import { ingestWorkbook, parseCSV, parseSheetsUrl } from '../extension/core/inge
 import { compile } from '../extension/agent/expr.js';
 import { sanitiseDescription } from '../extension/agent/mcp.js';
 import { Agent, truncateResult } from '../extension/agent/agent.js';
+import { explainInvoice, explainBasket, explainFixing, explainIndicator, explainQuoteWeight, toText } from '../extension/core/explain.js';
 import { ToolRegistry } from '../extension/agent/tools.js';
 import { analyze } from '../extension/core/pipeline.js';
 import { ols, normInv, autocorr1 } from '../extension/core/num.js';
@@ -903,6 +904,79 @@ test('the headline reports the honest USD comparison', () => {
 test('warnings are surfaced, not suppressed', () => {
   assert.ok(result.warnings.length > 0);
   assert.ok(result.warnings.some((w) => /outlier/.test(w)));
+});
+
+/* ── the working must be checked, not narrated ─────────────────── */
+
+const workedInvoice = result.book.priced.find((p) => !p.error);
+
+test('an invoice derivation reproduces every published figure', () => {
+  const d = explainInvoice(workedInvoice);
+  assert.ok(!d.error, d.error);
+  assert.ok(d.steps.length >= 12, 'every component needs its own step');
+  for (const c of d.checks) assert.ok(c.reconciles, `${c.what}: derived ${c.recomputed}, published ${c.published}`);
+});
+
+test('every derivation step shows formula, substituted numbers and result', () => {
+  const d = explainInvoice(workedInvoice);
+  for (const s of d.steps) {
+    assert.ok(s.formula, `step ${s.n} "${s.title}" has no formula`);
+    assert.ok(s.substitution, `step ${s.n} "${s.title}" does not show the numbers substituted in`);
+    assert.ok(s.result !== null && s.result !== undefined, `step ${s.n} "${s.title}" has no result`);
+  }
+});
+
+test('a derivation that has drifted from the code says so', () => {
+  // The whole point. An explanation that cannot be wrong is not evidence.
+  const drifted = structuredClone(workedInvoice);
+  drifted.invoicePrice.bcct *= 1.0001;
+  const d = explainInvoice(drifted);
+  const sumCheck = d.checks.find((c) => /components sum/.test(c.what));
+  assert.equal(sumCheck.reconciles, false, 'a published price that disagrees with its components must be caught');
+  assert.ok(sumCheck.absoluteDifference > 0);
+  assert.ok(/DOES NOT RECONCILE/.test(toText(d)), 'and the text output must say so plainly');
+});
+
+test('tampering with one component fails the reconciliation', () => {
+  const t = structuredClone(workedInvoice);
+  t.lines.find((l) => l.key === 'clearingFee').amountBCCT = 99999;
+  assert.ok(explainInvoice(t).checks.some((c) => !c.reconciles));
+});
+
+test('the basket derivation checks that the quantities still value to base', () => {
+  assert.ok(explainBasket(basket, fx).check.reconciles);
+  const b2 = structuredClone(basket);
+  b2.quantities.CNY *= 1.02;
+  assert.equal(explainBasket(b2, fx).check.reconciles, false, 'a tampered quantity must break the valuation check');
+});
+
+test('the indicator derivation reproduces the score', () => {
+  for (const [key, value] of [['debtGdp', 0.82], ['reserveMonths', 10.2], ['inflationYoY', 0.049], ['cds5y', 78]]) {
+    const d = explainIndicator(key, value);
+    assert.ok(d.check.reconciles, `${key} derivation does not reproduce its score`);
+    assert.equal(d.steps.length, 3, 'winsorise, standardise, map');
+  }
+});
+
+test('the fixing derivation reproduces a published rate', () => {
+  const d = explainFixing(fx, 'CNY/INR');
+  assert.ok(d.check?.reconciles, 'exp(p_i - p_j) must reproduce the published rate');
+  assert.ok(d.steps.some((s) => /Partition/.test(s.title)), 'the derivation must show the internal/external split');
+});
+
+test('the quote-weight derivation reproduces the weight', () => {
+  const q = fixtures.fx_quotes.find((x) => x.base === 'CNY' && x.quote === 'INR' && x.rate !== 14.9);
+  const d = explainQuoteWeight(q, undefined, Date.parse(fx.asOf));
+  assert.ok(d.check.reconciles, `derived ${d.check.recomputed} vs actual ${d.check.published}`);
+  assert.equal(d.steps.length, 6, 'five factors and their product');
+});
+
+test('the text rendering is complete enough to review offline', () => {
+  const t = toText(explainInvoice(workedInvoice));
+  assert.ok(t.includes('formula:'), 'formulas must survive the text rendering');
+  assert.ok(t.includes('with:'), 'so must the substituted numbers');
+  assert.ok(/CHECK/.test(t), 'and the reconciliation verdict');
+  assert.ok(t.length > 1500, 'a one-line summary is not a working');
 });
 
 /* ── report ──────────────────────────────────────────────────── */

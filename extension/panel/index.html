@@ -20,6 +20,7 @@
     <button class="tab" data-tab="diagnostics" role="tab">Diagnostics <span class="sect">§10</span></button>
     <button class="tab" data-tab="netting"     role="tab">Netting <span class="sect">§19</span></button>
     <button class="tab tab-primary" data-tab="invoice" role="tab">Invoice</button>
+    <button class="tab" data-tab="workings"    role="tab">Workings</button>
     <button class="tab" data-tab="agent"       role="tab">Agent</button>
     <div class="flex-1"></div>
     <span id="statusPill" class="mr-1 rounded-full bg-slate-800 px-2.5 py-1 text-[11px] text-slate-400">no data</span>
@@ -267,6 +268,32 @@
         <h3 class="card-h">Dollar dependency <span class="sect">§37</span></h3>
         <div id="dependency" class="mt-2"></div>
       </div>
+    </div>
+  </section>
+
+  <!-- ─────────── WORKINGS ─────────── -->
+  <section class="pane" data-pane="workings">
+    <div class="mx-auto max-w-5xl space-y-4 p-5">
+      <div class="sec-head">
+        <h2>Workings</h2>
+        <p>Every published figure, derived again step by step — the formula, the numbers substituted
+           into it, and the result. Each chain is then reconciled against what the tool actually
+           published, so a derivation that has drifted from the code says so instead of reading
+           plausibly.</p>
+      </div>
+
+      <div class="card">
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="text-[12px] text-slate-400">Derive</label>
+          <select id="workSelect" class="inp w-auto min-w-[280px]"></select>
+          <div class="flex-1"></div>
+          <button id="btnCopyWork" class="btn btn-sm">Copy as text</button>
+          <button id="btnDownloadWork" class="btn btn-sm">Download</button>
+        </div>
+      </div>
+
+      <div id="workCheck"></div>
+      <div id="workSteps" class="space-y-2"></div>
     </div>
   </section>
 

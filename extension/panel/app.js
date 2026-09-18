@@ -17,6 +17,7 @@ import { Memory } from '../agent/memory.js';
 import { SkillRegistry, SEED_SKILLS } from '../agent/skills.js';
 import { buildTools } from '../agent/tools.js';
 import { Agent, SUGGESTED_PROMPTS } from '../agent/agent.js';
+import * as EX from '../core/explain.js';
 import * as CH from './charts.js';
 
 /* ─────────────────────────── state ─────────────────────────── */
@@ -27,7 +28,7 @@ const S = {
   config: { ...DEFAULT_CONFIG, anchor: null },
   settings: null, providers: [], mcpTools: [],
   displayCcy: 'BCCT', selectedTrade: null, horizon: 30, waterfallMode: 'spread',
-  running: false, abort: null,
+  running: false, abort: null, ready: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -90,33 +91,49 @@ const bandBadge = (b) => `<span class="badge ${b === 'A' ? 'badge-ok' : b === 'B
 
 /* ─────────────────────────── boot ─────────────────────────── */
 
+/**
+ * Boot.
+ *
+ * Order matters. The SQLite WASM module and two service-worker round-trips take
+ * a noticeable moment, and if the handlers are attached after them every click
+ * during startup lands on a dead button and is silently swallowed — the user
+ * presses "Load sample data", nothing happens, and there is no clue why.
+ *
+ * So: attach handlers first, mark the actions visibly unavailable while the
+ * slow work runs, then enable them. A disabled button is honest; an inert one
+ * that looks live is not.
+ */
+
+/** Buttons that cannot do anything useful until boot has finished. */
+const STARTUP_GATED = ['btnSample', 'btnSheet', 'btnTemplate', 'btnRerun', 'btnExportDb', 'btnExportJson', 'btnExportCsv', 'btnResetDb', 'btnSend'];
+
+function setReady(ready) {
+  S.ready = ready;
+  for (const id of STARTUP_GATED) {
+    const b = $(id);
+    if (!b) continue;
+    b.disabled = !ready;
+    if (!ready) { b.dataset.startupLabel ??= b.textContent; b.title = 'starting up…'; }
+    else if (b.dataset.startupLabel) { b.textContent = b.dataset.startupLabel; b.title = ''; }
+  }
+  const fi = $('fileInput');
+  if (fi) fi.disabled = !ready;
+}
+
 async function boot() {
   status('starting…');
-  try {
-    S.store = new Store();
-    await S.store.open({ wasmPath: '../vendor/' });
-    S.memory = new Memory(S.store);
-    S.skills = new SkillRegistry(S.store);
-    for (const s of SEED_SKILLS) if (!S.skills.get(s.name)) S.skills.create({ ...s, origin: 'seed' });
-  } catch (e) {
-    toast(`Local database unavailable: ${e.message}. Analysis still works; nothing will be stored.`, 'err');
-  }
 
-  S.settings = await send('getSettings');
-  const p = await send('listProviders');
-  S.providers = p.providers || [];
-
+  // 1. Everything that needs no async work, wired before anything can be clicked.
   wireTabs();
   wireData();
   wireInvoice();
   wireNetting();
   wireDiagnostics();
-  wireAgent();
-  wireSettings();
+  wireWorkings();
   renderSchemaDoc();
   renderConfigGrid();
   renderReferenceTable();
-  await refreshDbStats();
+  setReady(false);
 
   window.addEventListener('resize', debounce(() => CH.resizeAll(), 120));
   window.addEventListener('message', (e) => {
@@ -127,8 +144,35 @@ async function boot() {
       $('btnThisTab').onclick = () => { $('sheetUrl').value = e.data.url; loadSheet(); };
     }
   });
-  try { parent.postMessage({ type: 'mpcpi:current-url' }, '*'); } catch {}
 
+  // 2. The slow parts. A failure here degrades the tool rather than stopping it:
+  //    the arithmetic needs neither the database nor a model provider.
+  try {
+    S.store = new Store();
+    await S.store.open({ wasmPath: '../vendor/' });
+    S.memory = new Memory(S.store);
+    S.skills = new SkillRegistry(S.store);
+    for (const sk of SEED_SKILLS) if (!S.skills.get(sk.name)) S.skills.create({ ...sk, origin: 'seed' });
+  } catch (e) {
+    toast(`Local database unavailable: ${e.message}. Analysis still works; nothing will be stored.`, 'err');
+  }
+
+  try {
+    S.settings = await send('getSettings');
+    const p = await send('listProviders');
+    S.providers = p.providers || [];
+  } catch {
+    S.providers = [];
+    toast('Could not reach the extension background worker; the Agent tab will not work.', 'err');
+  }
+
+  // 3. Provider-dependent UI, once the providers are actually known.
+  wireAgent();
+  wireSettings();
+  await refreshDbStats();
+
+  setReady(true);
+  try { parent.postMessage({ type: 'mpcpi:current-url' }, '*'); } catch {}
   status('ready — load data');
 }
 
@@ -335,6 +379,7 @@ async function run(patch = {}) {
 }
 
 function renderAll() {
+  renderWorkingsOptions();
   renderFixing();
   renderBasket();
   renderDiagnostics();
@@ -1048,6 +1093,127 @@ function downloadTemplate() {
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   download('mpcpi-template.xlsx', new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   toast('Template downloaded. Row 2 of each sheet documents the units — delete it before loading.', 'ok');
+}
+
+/* ─────────────────────────── workings ─────────────────────────── */
+
+function wireWorkings() {
+  $('workSelect').onchange = renderWorkings;
+  $('btnCopyWork').onclick = async () => {
+    const t = EX.toText(currentDerivation());
+    try { await navigator.clipboard.writeText(t); toast('Working copied.', 'ok'); }
+    catch { toast('Clipboard blocked; use Download instead.', 'err'); }
+  };
+  $('btnDownloadWork').onclick = () => {
+    const d = currentDerivation();
+    download(`mpcpi-working-${($('workSelect').value || 'derivation').replace(/[^a-z0-9]+/gi, '-')}.txt`,
+      new Blob([EX.toText(d)], { type: 'text/plain' }));
+  };
+}
+
+function renderWorkingsOptions() {
+  const sel = $('workSelect');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '';
+  const add = (value, label) => { const o = el('option'); o.value = value; o.textContent = label; sel.append(o); };
+
+  for (const p of S.result?.book?.priced?.filter((x) => !x.error) ?? []) {
+    add(`invoice:${p.tradeId}`, `Invoice ${p.tradeId} — ${p.sellerCurrency}→${p.buyerCurrency}, T+${p.settlementDays}`);
+  }
+  if (S.result?.fixing?.ok) {
+    add('fixing:', 'FX fixing — how the matrix is estimated');
+    for (const a of S.result.fixing.participants ?? []) {
+      for (const b of S.result.fixing.participants ?? []) {
+        if (a >= b) continue;
+        add(`fixing:${a}/${b}`, `FX fixing — worked example ${a}/${b}`);
+      }
+    }
+  }
+  if (S.result?.basket) add('basket:', 'BCC-T constitution — weights and quantities');
+  for (const q of (S.tables?.fx_quotes ?? []).slice(0, 30)) {
+    add(`quote:${q.base}/${q.quote}/${q.rate}`, `Quote weight — ${q.base}/${q.quote} @ ${q.rate}`);
+  }
+  for (const d of S.result?.diagnostics ?? []) {
+    for (const r of (d.scored?.rows ?? []).filter((x) => !x.missing).slice(0, 6)) {
+      add(`indicator:${d.participant}:${r.key}:${r.value}`, `Indicator — ${d.participant} ${r.key}`);
+    }
+  }
+  if (!sel.options.length) add('', 'Load a workbook first');
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  renderWorkings();
+}
+
+function currentDerivation() {
+  const v = $('workSelect')?.value ?? '';
+  const [kind, ...rest] = v.split(':');
+  const arg = rest.join(':');
+  const r = S.result;
+  if (!r) return { error: 'nothing loaded' };
+  if (kind === 'invoice') {
+    const inv = r.book?.priced?.find((p) => p.tradeId === arg);
+    return inv ? EX.explainInvoice(inv) : { error: `no invoice ${arg}` };
+  }
+  if (kind === 'fixing') return EX.explainFixing(r.fixing, arg || null);
+  if (kind === 'basket') return EX.explainBasket(r.basket, r.fixing);
+  if (kind === 'quote') {
+    const [b, q, rate] = arg.split('/');
+    const quote = (S.tables?.fx_quotes ?? []).find((x) => x.base === b && x.quote === q && String(x.rate) === rate);
+    return quote ? EX.explainQuoteWeight(quote, undefined, Date.parse(r.fixing?.asOf) || Date.now()) : { error: 'quote not found' };
+  }
+  if (kind === 'indicator') {
+    const [, key, value] = arg.split(':');
+    return EX.explainIndicator(key, Number(value));
+  }
+  return { error: 'nothing selected' };
+}
+
+function renderWorkings() {
+  const stepsBox = $('workSteps'), checkBox = $('workCheck');
+  if (!stepsBox) return;
+  stepsBox.innerHTML = ''; checkBox.innerHTML = '';
+
+  const d = currentDerivation();
+  if (d.error) { stepsBox.innerHTML = `<div class="note note-warn">${esc(d.error)}</div>`; return; }
+
+  const checks = d.checks ?? (d.check ? [{ what: 'result', ...d.check }] : []);
+  if (checks.length) {
+    const allOk = checks.every((c) => c.reconciles);
+    const box = el('div', `note ${allOk ? 'note-ok' : 'note-bad'}`);
+    box.innerHTML = allOk
+      ? `<b>Reconciled.</b> ${checks.map((c) => esc(c.what)).join(', ')} — the derivation below reproduces the published figures exactly.`
+      : `<b>Does not reconcile.</b> ` + checks.filter((c) => !c.reconciles).map((c) =>
+        `${esc(c.what)}: derived ${fmt(c.recomputed, 6)}, published ${fmt(c.published, 6)} (difference ${fmt(c.absoluteDifference, 8)})`).join('; ') +
+        ' — the working and the code disagree, so treat the published figure as unverified.';
+    checkBox.append(box);
+  }
+
+  stepsBox.append(el('h3', 'text-[14px] font-semibold text-slate-100 mb-1', esc(d.title)));
+
+  for (const s of d.steps) {
+    const card = el('div', 'rounded-lg border border-slate-800 bg-slate-900/50 p-3');
+    const head = el('div', 'flex items-baseline gap-2');
+    head.innerHTML = `<span class="inline-grid h-5 w-5 shrink-0 place-items-center rounded-full bg-slate-800 text-[11px] font-semibold text-cyan-300">${s.n}</span>
+      <span class="text-[13px] font-medium text-slate-200">${esc(s.title)}</span>
+      ${s.section ? `<span class="text-[10px] text-slate-600">${esc(s.section)}</span>` : ''}`;
+    card.append(head);
+
+    const body = el('div', 'mt-2 space-y-1 pl-7 text-[12px]');
+    if (s.formula) body.append(el('div', '', `<span class="inline-block w-16 text-slate-600">formula</span><code class="text-indigo-300">${esc(s.formula)}</code>`));
+    if (s.substitution) body.append(el('div', '', `<span class="inline-block w-16 text-slate-600">with</span><code class="text-slate-300">${esc(s.substitution)}</code>`));
+    if (s.result !== null && s.result !== undefined) {
+      body.append(el('div', '', `<span class="inline-block w-16 text-slate-600">=</span><b class="tabular-nums text-cyan-300">${esc(EX.formatValue(s.result, 6))}</b>${s.unit ? ` <span class="text-slate-500">${esc(s.unit)}</span>` : ''}`));
+    }
+    if (s.rows?.length) {
+      const t = el('table', 'mt-1 text-[11px]');
+      t.innerHTML = `<tbody>${s.rows.map((r) => `<tr>${Object.entries(r).map(([k, v]) =>
+        `<td class="pr-3 py-0.5"><span class="text-slate-600">${esc(k)}</span> <span class="tabular-nums text-slate-300">${esc(typeof v === 'number' ? EX.formatValue(v, 6) : String(v))}</span></td>`).join('')}</tr>`).join('')}</tbody>`;
+      body.append(t);
+    }
+    if (s.note) body.append(el('div', 'mt-1 text-[11.5px] leading-relaxed text-slate-500', esc(s.note)));
+    card.append(body);
+    stepsBox.append(card);
+  }
 }
 
 /* ─────────────────────────── agent ─────────────────────────── */
