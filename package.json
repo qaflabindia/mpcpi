@@ -1,0 +1,24 @@
+{
+  "name": "mpcpi",
+  "version": "1.0.0",
+  "description": "MPCPI \u2014 Multipolar Currency Pricing & Invoicing Instrument (Chrome MV3 extension)",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i ./src/tailwind.css -o ./extension/panel/tailwind.css --minify",
+    "watch:css": "tailwindcss -c tailwind.config.js -i ./src/tailwind.css -o ./extension/panel/tailwind.css --watch",
+    "test": "node tests/run.js",
+    "check:secrets": "node tools/check-secrets.mjs",
+    "check:all": "node tools/check-secrets.mjs && node tools/lint-extension.js && node tests/run.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  },
+  "private": true
+}

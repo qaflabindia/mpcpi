@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "MPCPI — Multipolar Currency Pricing & Invoicing",
+  "short_name": "MPCPI",
+  "version": "1.0.0",
+  "description": "Floating BRICS BCC-T/BCC-C/BCC-D workbench: multilateral FX fixing, leading & lagging diagnostics, netting and invoice pricing from a Google Sheet or Excel file.",
+  "minimum_chrome_version": "116",
+
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "activeTab",
+    "scripting",
+    "contextMenus",
+    "downloads"
+  ],
+
+  "host_permissions": [
+    "https://docs.google.com/*",
+    "https://sheets.googleapis.com/*",
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api-inference.huggingface.co/*",
+    "https://router.huggingface.co/*",
+    "https://openrouter.ai/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+
+  "action": {
+    "default_title": "Open MPCPI (Alt+Shift+M)",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" }
+  },
+
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/overlay.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["panel/*", "vendor/*", "core/*", "agent/*", "icons/*", "samples/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
+  "options_page": "options/options.html",
+
+  "commands": {
+    "toggle-panel": {
+      "suggested_key": { "default": "Alt+Shift+M", "mac": "Alt+Shift+M" },
+      "description": "Toggle the MPCPI floating panel"
+    }
+  },
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*"
+  }
+}

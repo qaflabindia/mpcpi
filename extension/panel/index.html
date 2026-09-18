@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MPCPI</title>
+<link rel="icon" href="../icons/32.png">
+<link rel="stylesheet" href="tailwind.css">
+<link rel="stylesheet" href="panel.css">
+</head>
+<body class="h-full bg-slate-950 text-slate-200 antialiased overflow-hidden">
+
+<div class="flex h-screen flex-col">
+
+  <!-- ─────────── tab strip ─────────── -->
+  <nav class="flex shrink-0 items-center gap-0.5 border-b border-slate-800 bg-slate-900/60 px-2" role="tablist">
+    <button class="tab tab-active" data-tab="data"    role="tab">Data</button>
+    <button class="tab" data-tab="fixing"      role="tab">Fixing <span class="sect">§8</span></button>
+    <button class="tab" data-tab="basket"      role="tab">Basket <span class="sect">§6</span></button>
+    <button class="tab" data-tab="diagnostics" role="tab">Diagnostics <span class="sect">§10</span></button>
+    <button class="tab" data-tab="netting"     role="tab">Netting <span class="sect">§19</span></button>
+    <button class="tab tab-primary" data-tab="invoice" role="tab">Invoice</button>
+    <button class="tab" data-tab="agent"       role="tab">Agent</button>
+    <div class="flex-1"></div>
+    <span id="statusPill" class="mr-1 rounded-full bg-slate-800 px-2.5 py-1 text-[11px] text-slate-400">no data</span>
+    <button class="tab" data-tab="settings" role="tab" title="Settings">⚙</button>
+  </nav>
+
+  <!-- ─────────── DATA ─────────── -->
+  <section class="pane active" data-pane="data">
+    <div class="mx-auto max-w-5xl space-y-5 p-5">
+
+      <header>
+        <h1 class="text-xl font-semibold text-slate-100">Multipolar Currency Pricing &amp; Invoicing</h1>
+        <p class="mt-1 text-[13px] leading-relaxed text-slate-400">
+          Load a Google Sheet or an Excel workbook. The tool fixes a triangularly consistent cross-rate
+          matrix, constitutes the BCC-T basket, scores leading and lagging diagnostics, nets the
+          obligation matrix and prices every invoice — showing each component and the
+          dollar-intermediated alternative beside it.
+        </p>
+      </header>
+
+      <div class="grid gap-3 md:grid-cols-3">
+        <div class="card">
+          <h3 class="card-h">Google Sheet</h3>
+          <p class="hint">Any sheet this Chrome profile can already open, including private ones.</p>
+          <input id="sheetUrl" type="url" class="inp mt-2" placeholder="https://docs.google.com/spreadsheets/d/…">
+          <button id="btnSheet" class="btn btn-primary mt-2 w-full">Load sheet</button>
+          <button id="btnThisTab" class="btn mt-1.5 w-full hidden">Use the sheet in this tab</button>
+        </div>
+        <div class="card">
+          <h3 class="card-h">Excel or CSV</h3>
+          <p class="hint">.xlsx, .xlsm or .csv. Nothing is uploaded; parsing happens in this panel.</p>
+          <input id="fileInput" type="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv" class="mt-2 block w-full text-[12px] file:mr-2 file:rounded-md file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-slate-200 hover:file:bg-slate-600">
+          <div id="dropZone" class="mt-2 rounded-lg border border-dashed border-slate-700 py-4 text-center text-[12px] text-slate-500">or drop a file here</div>
+        </div>
+        <div class="card">
+          <h3 class="card-h">Sample</h3>
+          <p class="hint">Five BRICS currencies, six trades, twelve months of obligations. Illustrative figures.</p>
+          <button id="btnSample" class="btn btn-primary mt-2 w-full">Load sample data</button>
+          <button id="btnTemplate" class="btn mt-1.5 w-full">Download blank template</button>
+        </div>
+      </div>
+
+      <div id="ingestReport" class="hidden"></div>
+
+      <details class="card">
+        <summary class="cursor-pointer text-[13px] font-medium text-slate-300">Expected workbook layout</summary>
+        <div id="schemaDoc" class="mt-3 space-y-3 text-[12px]"></div>
+      </details>
+
+      <details class="card">
+        <summary class="cursor-pointer text-[13px] font-medium text-slate-300">Model parameters</summary>
+        <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" id="configGrid"></div>
+        <button id="btnRerun" class="btn btn-primary mt-3">Recompute</button>
+      </details>
+
+      <details class="card">
+        <summary class="cursor-pointer text-[13px] font-medium text-slate-300">Stored runs &amp; export</summary>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button id="btnExportDb"   class="btn">Export SQLite database</button>
+          <button id="btnExportJson" class="btn">Export results as JSON</button>
+          <button id="btnExportCsv"  class="btn">Export invoices as CSV</button>
+          <button id="btnResetDb"    class="btn btn-danger">Clear stored runs</button>
+        </div>
+        <div id="dbStats" class="mt-3 text-[12px] text-slate-400"></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ─────────── FIXING ─────────── -->
+  <section class="pane" data-pane="fixing">
+    <div class="mx-auto max-w-6xl space-y-4 p-5">
+      <div class="sec-head">
+        <h2>Multilateral FX fixing</h2>
+        <p>One shadow log-price per currency, estimated jointly by weighted least squares, so
+           <code>FX<sub>ij</sub> · FX<sub>jk</sub> = FX<sub>ik</sub></code> holds by construction rather than by luck (§8).
+           The participating network is fitted <em>alone</em>; the vehicle currency is attached afterwards as a
+           satellite and cannot move the internal matrix (§37).</p>
+      </div>
+      <div id="fixStats" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"></div>
+
+      <div class="card">
+        <h3 class="card-h">Rates quoted in BCC-T <span class="sect">§5, §37</span></h3>
+        <p class="hint mt-1">The primary quotation. Every bilateral below is
+          <code>V<sub>j</sub> / V<sub>i</sub></code> — no third currency is consulted to discover any pair.</p>
+        <div id="pivotTable" class="mt-3 overflow-auto"></div>
+        <div id="pivotNote" class="mt-3"></div>
+      </div>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div class="card"><h3 class="card-h">Cross-rate matrix</h3><div id="chartMatrix" class="chart h-[340px]"></div></div>
+        <div class="card"><h3 class="card-h">Quote residuals against the fitted matrix</h3><div id="chartResid" class="chart h-[340px]"></div></div>
+      </div>
+      <div class="card"><h3 class="card-h">Published rates</h3><div id="fixTable" class="mt-2 overflow-auto"></div></div>
+      <div id="fixRejected"></div>
+    </div>
+  </section>
+
+  <!-- ─────────── BASKET ─────────── -->
+  <section class="pane" data-pane="basket">
+    <div class="mx-auto max-w-6xl space-y-4 p-5">
+      <div class="sec-head">
+        <h2>BCC-T constitution</h2>
+        <p>A fixed quantity vector, capped and redistributed (§6). Quantities change only at a scheduled
+           reconstitution — never because a diagnostic moved (§4).</p>
+      </div>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div class="card"><h3 class="card-h">Raw against capped weights</h3><div id="chartWeights" class="chart h-[320px]"></div></div>
+        <div class="card"><h3 class="card-h">Value of one BCC-T unit</h3><div id="chartValues" class="chart h-[320px]"></div></div>
+      </div>
+      <div class="card"><h3 class="card-h">Components</h3><div id="basketTable" class="mt-2 overflow-auto"></div></div>
+      <div class="card">
+        <h3 class="card-h">Self-reference attenuation <span class="sect">§7</span></h3>
+        <p class="hint mt-1">A basket that contains a currency cannot independently measure it. A shock to
+           currency <em>i</em> registers at only (1 − w<sub>i</sub>) of its true size.</p>
+        <div id="selfRef" class="mt-3"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────── DIAGNOSTICS ─────────── -->
+  <section class="pane" data-pane="diagnostics">
+    <div class="mx-auto max-w-6xl space-y-4 p-5">
+      <div class="sec-head">
+        <h2>BCC-D diagnostics</h2>
+        <p>Currency health and currency power are measured separately (§10, §14). Leading indicators move
+           before the outcome; lagging indicators confirm after it. Neither touches the basket.</p>
+      </div>
+
+      <div class="card">
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="text-[12px] text-slate-400">Settlement horizon for the blend</label>
+          <input id="horizonSlider" type="range" min="1" max="365" value="30" class="w-56 accent-cyan-400">
+          <span id="horizonLabel" class="badge">30 days</span>
+          <span id="horizonWeights" class="text-[12px] text-slate-400"></span>
+        </div>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div class="card"><h3 class="card-h">Leading against lagging</h3><div id="chartDiverge" class="chart h-[340px]"></div></div>
+        <div class="card"><h3 class="card-h">Health blocks</h3><div id="chartRadar" class="chart h-[340px]"></div></div>
+      </div>
+
+      <div class="card"><h3 class="card-h">Participants</h3><div id="diagTable" class="mt-2 overflow-auto"></div></div>
+
+      <div class="card">
+        <h3 class="card-h">Excess international usage <span class="sect">§16</span></h3>
+        <p class="hint mt-1">The residual from CPS regressed on health, market depth and trade scale — an
+          estimate with a standard error, not an assertion. Subtracting CPS from CHS, which the framework
+          rejects, is not offered anywhere in this tool.</p>
+        <div id="chartExcess" class="chart mt-3 h-[300px]"></div>
+        <div id="excessTable" class="mt-3 overflow-auto"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────── NETTING ─────────── -->
+  <section class="pane" data-pane="netting">
+    <div class="mx-auto max-w-6xl space-y-4 p-5">
+      <div class="sec-head">
+        <h2>Multilateral netting</h2>
+        <p>Compression is an accounting identity (§19). What decides whether the design works is the size and
+           persistence of residual creditor balances (§20).</p>
+      </div>
+      <div id="netStats" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"></div>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div class="card"><h3 class="card-h">Gross, bilaterally netted and multilaterally netted</h3><div id="chartNetting" class="chart h-[320px]"></div></div>
+        <div class="card"><h3 class="card-h">Net positions over time</h3><div id="chartPositions" class="chart h-[320px]"></div></div>
+      </div>
+      <div class="card"><h3 class="card-h">Bilateral obligation flows</h3><div id="chartSankey" class="chart h-[400px]"></div></div>
+      <div class="card">
+        <h3 class="card-h">Persistence <span class="sect">§20</span></h3>
+        <div id="persistTable" class="mt-2 overflow-auto"></div>
+        <div id="nettingVerdict" class="mt-3"></div>
+      </div>
+      <div class="card">
+        <h3 class="card-h">Stress the matrix <span class="sect">§20.7</span></h3>
+        <div class="mt-2 flex flex-wrap gap-2">
+          <button class="btn btn-sm" data-stress="energy">Energy −40%</button>
+          <button class="btn btn-sm" data-stress="hub">Hub imports −50%</button>
+          <button class="btn btn-sm" data-stress="global">All flows −25%</button>
+          <button class="btn btn-sm" data-stress="all">Run all three</button>
+        </div>
+        <div id="stressOut" class="mt-3"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────── INVOICE ─────────── -->
+  <section class="pane" data-pane="invoice">
+    <div class="mx-auto max-w-6xl space-y-4 p-5">
+      <div class="sec-head">
+        <h2>Invoice price</h2>
+        <p>Every currency unit charged is traceable to a named clause. Nothing is folded into an opaque
+           risk margin, and the dollar-intermediated route is priced beside it.</p>
+      </div>
+
+      <div id="bookStats" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"></div>
+
+      <div class="card">
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="text-[12px] text-slate-400">Invoice</label>
+          <select id="tradeSelect" class="inp w-auto min-w-[260px]"></select>
+          <div class="flex-1"></div>
+          <label class="flex items-center gap-1.5 text-[12px] text-slate-400">
+            <span>show in</span>
+            <select id="displayCcy" class="inp w-auto"></select>
+          </label>
+        </div>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-5">
+        <div class="card lg:col-span-3">
+          <div class="flex items-center gap-2">
+            <h3 class="card-h">Price build-up</h3>
+            <div class="flex-1"></div>
+            <button class="btn btn-sm" id="wfFull" data-wf="full">Full</button>
+            <button class="btn btn-sm" id="wfSpread" data-wf="spread">Spread only</button>
+          </div>
+          <div id="chartWaterfall" class="chart mt-2 h-[400px]"></div>
+        </div>
+        <div class="card lg:col-span-2">
+          <h3 class="card-h">Settlement infrastructure, compared</h3>
+          <p class="hint mt-1">Route-specific costs only. Interest carry and FX risk are identical on both routes and would otherwise swamp the difference.</p>
+          <div id="chartCompare" class="chart mt-1 h-[400px]"></div>
+        </div>
+      </div>
+
+      <div id="invoiceHeadline"></div>
+      <div class="card"><h3 class="card-h">Components</h3><div id="invoiceTable" class="mt-2 overflow-auto"></div></div>
+      <div id="invoiceNotes"></div>
+
+      <div class="card">
+        <h3 class="card-h">Sensitivity</h3>
+        <p class="hint mt-1">How the all-in price moves with the settlement horizon and the hedge ratio, holding everything else fixed.</p>
+        <div id="chartSensitivity" class="chart mt-2 h-[300px]"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-h">Whole book</h3>
+        <p class="hint mt-1">Which component drives the cost across every invoice, not just the one selected above.</p>
+        <div id="chartBookComponents" class="chart mt-2 h-[260px]"></div>
+        <div id="bookTable" class="mt-3 overflow-auto"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-h">Dollar dependency <span class="sect">§37</span></h3>
+        <div id="dependency" class="mt-2"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────── AGENT ─────────── -->
+  <section class="pane flex-col" data-pane="agent">
+    <div class="flex min-h-0 flex-1 flex-col">
+      <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-900/40 px-4 py-2">
+        <select id="agentProvider" class="inp w-auto text-[12px]"></select>
+        <select id="agentModel" class="inp w-auto min-w-[160px] text-[12px]"></select>
+        <span id="agentKeyWarn" class="hidden badge badge-warn">no API key</span>
+        <div class="flex-1"></div>
+        <span id="agentUsage" class="text-[11px] text-slate-500"></span>
+        <button id="btnAgentReset" class="btn btn-sm">New conversation</button>
+      </div>
+
+      <div id="chatLog" class="min-h-0 flex-1 space-y-3 overflow-y-auto p-4"></div>
+
+      <div id="suggestions" class="shrink-0 flex flex-wrap gap-1.5 px-4 pb-2"></div>
+
+      <div class="shrink-0 border-t border-slate-800 bg-slate-900/40 p-3">
+        <div class="flex gap-2">
+          <textarea id="chatInput" rows="2" class="inp flex-1 resize-none" placeholder="Ask about the pricing, the diagnostics or the data…"></textarea>
+          <button id="btnSend" class="btn btn-primary self-end px-5">Send</button>
+        </div>
+        <div class="mt-1.5 flex items-center gap-3 text-[11px] text-slate-500">
+          <span>The agent reads results through tools; it does not compute numbers itself.</span>
+          <div class="flex-1"></div>
+          <a href="#" id="linkSkills" class="underline hover:text-slate-300">skills</a>
+          <a href="#" id="linkMemory" class="underline hover:text-slate-300">memory</a>
+          <a href="#" id="linkTrace"  class="underline hover:text-slate-300">trace</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────── SETTINGS ─────────── -->
+  <section class="pane" data-pane="settings">
+    <div class="mx-auto max-w-4xl space-y-4 p-5">
+
+      <div class="card">
+        <h3 class="card-h">Model provider</h3>
+        <p class="hint mt-1">Keys are held in this browser profile's extension storage and are sent only to the
+          provider you select. They are never written to the SQLite database, never logged and never sent anywhere else.</p>
+        <div id="providerList" class="mt-3 space-y-3"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-h">MCP servers</h3>
+        <p class="hint mt-1">Connects to HTTP or SSE MCP servers. A stdio server needs an HTTP bridge in front
+          of it — a browser extension cannot spawn processes. Tools from these servers leave your machine, so
+          each call asks for approval unless you allow the server.</p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <input id="mcpName" class="inp w-40" placeholder="name">
+          <input id="mcpUrl"  class="inp flex-1 min-w-[240px]" placeholder="https://host/mcp">
+          <input id="mcpAuth" class="inp w-56" placeholder="Authorization header (optional)">
+          <button id="btnMcpAdd" class="btn btn-primary">Connect</button>
+        </div>
+        <div id="mcpList" class="mt-3 space-y-2"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-h">Reference distributions <span class="sect">§11</span></h3>
+        <p class="hint mt-1">Fixed calibration constants. Set them once from a calibration sample and leave them
+          alone — that is what makes a score in 2035 mean what it meant in 2027. Cross-sectional min-max
+          scaling is deliberately not offered.</p>
+        <div id="refTable" class="mt-3 max-h-80 overflow-auto"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-h">About</h3>
+        <div class="mt-2 space-y-1.5 text-[12px] text-slate-400">
+          <p>MPCPI 1.0.0 — an implementation of the BCC-T / BCC-C / BCC-D framework.</p>
+          <p><strong class="text-slate-300">This is a research instrument.</strong> The framework it implements is an
+             untested institutional proposal, and several of its central claims — netting efficiency on real
+             BRICS flows above all — are explicitly identified as open empirical questions (§20, §34). Prices
+             produced here are illustrative decompositions, not quotes, and nothing here is investment advice.</p>
+          <p>No telemetry. No analytics. Nothing leaves this browser except calls to the model provider you
+             choose and the MCP servers you connect.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- modal -->
+<div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-6">
+  <div class="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+    <div class="mb-3 flex items-center gap-3">
+      <h3 id="modalTitle" class="text-base font-semibold text-slate-100"></h3>
+      <div class="flex-1"></div>
+      <button id="modalClose" class="btn btn-sm">Close</button>
+    </div>
+    <div id="modalBody" class="text-[12.5px]"></div>
+  </div>
+</div>
+
+<div id="toast" class="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2"></div>
+
+<script src="../vendor/sql-wasm.js"></script>
+<script src="../vendor/xlsx.full.min.js"></script>
+<script src="../vendor/echarts.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

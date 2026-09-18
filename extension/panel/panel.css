@@ -1,0 +1,71 @@
+/* Panel-local styles: the few things that are clearer written directly than as
+   utility classes, plus scrollbar and chart-container handling. */
+
+html, body { height: 100%; margin: 0; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #334155; border: 2px solid transparent; background-clip: content-box; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; background-clip: content-box; }
+
+.chart { width: 100%; }
+.chart canvas { border-radius: 6px; }
+
+/* ECharts injects its own tooltip at the body root, outside Tailwind's reach. */
+.echarts-tooltip-dark {
+  background: rgba(15, 23, 42, .97) !important;
+  border: 1px solid #334155 !important;
+  color: #e2e8f0 !important;
+  font-size: 12px !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5) !important;
+}
+
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; color: #a5b4fc; }
+sub, sup { font-size: .72em; }
+
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: '▸'; display: inline-block; width: 1em; color: #64748b; transition: transform .15s; }
+details[open] > summary::before { transform: rotate(90deg); }
+
+.toast-item {
+  pointer-events: auto;
+  margin-top: .4rem;
+  border-radius: .6rem;
+  padding: .55rem .9rem;
+  font-size: 12.5px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  animation: toastIn .18s ease-out;
+}
+.toast-item.err { border-color: #9f1239; background: #4c0519; color: #fecdd3; }
+.toast-item.ok  { border-color: #047857; background: #022c22; color: #a7f3d0; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* Chat markdown, kept deliberately minimal. */
+.msg-bot p { margin: 0 0 .55em; }
+.msg-bot p:last-child { margin-bottom: 0; }
+.msg-bot ul, .msg-bot ol { margin: .3em 0 .6em 1.2em; }
+.msg-bot li { margin: .15em 0; }
+.msg-bot code { background: rgba(148,163,184,.14); padding: .1em .35em; border-radius: .25em; }
+.msg-bot pre { background: #020617; border: 1px solid #1e293b; border-radius: .5em; padding: .6em .8em; overflow-x: auto; margin: .5em 0; }
+.msg-bot pre code { background: none; padding: 0; }
+.msg-bot table { border-collapse: collapse; margin: .5em 0; font-size: 12px; }
+.msg-bot th, .msg-bot td { border: 1px solid #1e293b; padding: .3em .55em; }
+.msg-bot strong { color: #f1f5f9; }
+
+.tool-chip {
+  display: inline-flex; align-items: center; gap: .35em;
+  font-family: ui-monospace, monospace; font-size: 11px;
+  background: rgba(30,41,59,.7); border: 1px solid #334155;
+  border-radius: .4em; padding: .15em .5em; margin: .15em .25em .15em 0;
+}
+.tool-chip.ok  { border-color: #065f46; }
+.tool-chip.bad { border-color: #9f1239; color: #fda4af; }
+
+.spin { display: inline-block; width: .85em; height: .85em; border: 2px solid #475569; border-top-color: #22d3ee; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } .toast-item { animation: none; } }

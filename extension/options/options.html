@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MPCPI — setup</title>
+<link rel="icon" href="../icons/32.png">
+<link rel="stylesheet" href="../panel/tailwind.css">
+<link rel="stylesheet" href="../panel/panel.css">
+</head>
+<body class="min-h-full bg-slate-950 text-slate-200 antialiased">
+<div class="mx-auto max-w-3xl space-y-5 p-8">
+
+  <header class="flex items-center gap-3">
+    <img src="../icons/48.png" alt="" width="40" height="40" class="rounded-lg">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-100">MPCPI</h1>
+      <p class="text-[13px] text-slate-400">Multipolar Currency Pricing &amp; Invoicing — BCC-T / BCC-C / BCC-D workbench</p>
+    </div>
+  </header>
+
+  <div id="welcome" class="note note-info hidden">
+    Installed. Press <kbd class="badge">Alt</kbd>+<kbd class="badge">Shift</kbd>+<kbd class="badge">M</kbd> on any page, or
+    click the toolbar icon, to open the floating panel. You can start with the built-in sample dataset — no key
+    or configuration needed for the arithmetic. A model provider is only required for the Agent tab.
+  </div>
+
+  <section class="card">
+    <h2 class="card-h">How it works</h2>
+    <ol class="mt-2 space-y-1.5 text-[12.5px] text-slate-400 list-decimal pl-5">
+      <li>Load a Google Sheet, an Excel workbook or a CSV. Column headers are matched fuzzily and every uncertain match is reported.</li>
+      <li>A triangularly consistent cross-rate matrix is fitted from your quotes by weighted least squares (§8).</li>
+      <li>BCC-T is constituted as a fixed quantity vector with a concentration cap (§6).</li>
+      <li>Leading and lagging indicators are scored against fixed reference distributions, never cross-sectional min-max (§11).</li>
+      <li>Obligations are netted multilaterally and tested for creditor persistence (§19, §20).</li>
+      <li>Each invoice is priced as a transparent sum of named components, with the dollar-intermediated route priced beside it.</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2 class="card-h">Import keys from a file</h2>
+    <p class="hint mt-1">Pick or paste a file holding your keys — <code># Label</code> headings,
+      <code>NAME=value</code> or <code>label: value</code> all parse. Everything happens in this page:
+      the file is read locally, each key is handed straight to extension storage, and nothing is
+      logged, written to the database or included in an export. Keys are shown masked.</p>
+
+    <div class="mt-3 flex flex-wrap items-center gap-2">
+      <input id="keyFile" type="file" accept=".md,.txt,.env,.json,.yaml,.yml"
+             class="block text-[12px] file:mr-2 file:rounded-md file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-slate-200 hover:file:bg-slate-600">
+      <span class="text-[11px] text-slate-500">or paste below</span>
+    </div>
+    <textarea id="keyPaste" rows="3" class="inp mt-2 font-mono text-[11.5px]" placeholder="# Claude API Key&#10;sk-ant-…"></textarea>
+    <button id="btnParseKeys" class="btn mt-2">Read keys</button>
+
+    <div id="keyResult" class="mt-3 hidden"></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card-h">Model provider</h2>
+    <p class="hint mt-1">Optional. The whole computation runs without one; a provider is needed only for the Agent tab.
+      Keys live in this browser profile's extension storage and are sent only to the provider you pick.</p>
+    <div id="providers" class="mt-3 space-y-3"></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card-h">Running a local model</h2>
+    <div class="mt-2 space-y-2 text-[12.5px] text-slate-400">
+      <p>Ollama refuses cross-origin requests by default, so it has to be told that an extension may call it:</p>
+      <pre class="overflow-x-auto rounded bg-slate-950 p-3 text-[11.5px] text-slate-300">OLLAMA_ORIGINS="chrome-extension://*" ollama serve</pre>
+      <p>On macOS, if Ollama runs as a background app: <code>launchctl setenv OLLAMA_ORIGINS "chrome-extension://*"</code>, then restart it.</p>
+      <p>LM Studio, vLLM, LocalAI, Groq, Together and OpenRouter all work through the
+        <b>OpenAI-compatible endpoint</b> provider — set the base URL and, where needed, a key.</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="card-h">MCP servers</h2>
+    <p class="hint mt-1">Add them from the panel's Settings tab. HTTP and SSE transports work; a stdio server needs an
+      HTTP bridge, because an extension cannot spawn processes. Tool calls to an MCP server leave your machine, so
+      each one asks for approval until you allow that server.</p>
+  </section>
+
+  <section class="card">
+    <h2 class="card-h">Privacy</h2>
+    <ul class="mt-2 space-y-1.5 text-[12.5px] text-slate-400 list-disc pl-5">
+      <li>Spreadsheets are parsed in the panel. Their contents are never uploaded.</li>
+      <li>Results live in a local SQLite database in this browser profile, exportable as a file.</li>
+      <li>Google Sheets are fetched with your existing browser session, so private sheets work without any token being stored.</li>
+      <li>No telemetry, no analytics, no remote logging. The only outbound calls are to the model provider you select and to MCP servers you add.</li>
+      <li>API keys are never written to the database, the trace log or an export.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2 class="card-h">What this is not</h2>
+    <p class="mt-2 text-[12.5px] leading-relaxed text-slate-400">
+      This implements a <b class="text-slate-300">research proposal</b>. The framework's own text identifies its central
+      questions as untested — whether real BRICS flows net efficiently above all (§20, §34). Prices produced here are
+      illustrative decompositions computed from the data you supply, not quotes, not advice, and not a claim that the
+      direct route is cheaper. Where your data says the dollar route costs less, the tool says so.
+    </p>
+  </section>
+</div>
+<script type="module" src="options.js"></script>
+</body>
+</html>

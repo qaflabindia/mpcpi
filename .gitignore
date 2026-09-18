@@ -1,0 +1,16 @@
+node_modules/
+*.sqlite
+.DS_Store
+
+# ── secrets ───────────────────────────────────────────────────────────────
+# Never commit. Never package. See tools/check-secrets.mjs, which fails the
+# build if any of these end up inside extension/.
+keys.md
+keys*.md
+*.key
+*.pem
+.env
+.env.*
+secrets/
+*credentials*
+*.secret
