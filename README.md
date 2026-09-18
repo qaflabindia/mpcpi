@@ -229,6 +229,31 @@ suspicious. Two further errors turned out to favour the framework:
 All five are now covered by regression tests, and those tests were mutation-checked: each one fails
 when the old behaviour is restored.
 
+## Written to be understood
+
+Every screen opens in ordinary English — what it is for, what you are looking at, and why it
+matters — with the exact technical wording kept behind a *the precise wording, for the record*
+toggle. Both audiences are real; the original version served only one of them.
+
+The fixing page, for instance, used to open with:
+
+> One shadow log-price per currency, estimated jointly by weighted least squares, so
+> FX_ij · FX_jk = FX_ik holds by construction rather than by luck (§8).
+
+It now opens with:
+
+> Exchange rates from different sources rarely agree with each other. Suppose you buy rupees with
+> yuan, then reais with those rupees. You ought to end up with the same amount as if you had bought
+> reais with yuan directly — but quoted rates usually leave a small gap, and somebody always ends up
+> paying it. This page closes that gap…
+
+The precise sentence is still there, one click away. A **glossary** on the Data tab defines the 19
+terms the copy cannot avoid — basis point, spread, settlement, hedge, wrong-way risk and the rest —
+each without using jargon of its own.
+
+Tests enforce this: a jargon list is checked against the plain copy, every tooltip, and every
+glossary definition, so the readable layer cannot quietly rot back into the technical one.
+
 ## Themes and tooltips
 
 A **◐ toggle** in the tab strip switches between dark and light; the first run follows the OS
@@ -236,10 +261,10 @@ preference and the choice is then remembered. Colours are defined once as CSS cu
 read by both the stylesheet and `charts.js`, so the charts re-theme with the page rather than staying
 dark on a light surface.
 
-Every stat card and table column carries an **ⓘ** explaining what the figure is, how it was derived
-and which section of the framework it comes from — 45 entries, 35 of them citing a section. The text
-lives in one registry (`panel/help.js`) rather than scattered through the markup, so it can be
-reviewed as a body of writing and tested for completeness.
+Every stat card and table column carries an **ⓘ** explaining what the figure means to someone
+reading it for the first time, and why they should care — 45 entries averaging 33 words, each
+naming the framework section it comes from. The text lives in one registry (`panel/help.js`) rather
+than scattered through the markup, so it can be reviewed as a body of writing and tested.
 
 ## Showing the working
 
@@ -336,7 +361,7 @@ before a model ever sees it, and the agent's system prompt states the rule.
 ## Development
 
 ```bash
-npm test                  # 123 assertions over the computational core
+npm test                  # 127 assertions over the computational core
 npm run check:all         # secrets scan + reference lint + tests
 node tools/check-secrets.mjs   # refuses to ship a file containing a credential
 node tools/lint-extension.js   # manifest paths, imports, MV3 CSP constraints

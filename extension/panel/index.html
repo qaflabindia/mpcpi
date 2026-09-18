@@ -34,12 +34,7 @@
 
       <header>
         <h1 class="text-xl font-semibold text-slate-100">Multipolar Currency Pricing &amp; Invoicing</h1>
-        <p class="mt-1 text-[13px] leading-relaxed text-slate-400">
-          Load a Google Sheet or an Excel workbook. The tool fixes a triangularly consistent cross-rate
-          matrix, constitutes the BCC-T basket, scores leading and lagging diagnostics, nets the
-          obligation matrix and prices every invoice — showing each component and the
-          dollar-intermediated alternative beside it.
-        </p>
+        <div class="sec-head mt-1" data-copy="data"></div>
       </header>
 
       <div class="grid gap-3 md:grid-cols-3">
@@ -65,6 +60,11 @@
       </div>
 
       <div id="ingestReport" class="hidden"></div>
+
+      <details class="card">
+        <summary class="cursor-pointer text-[13px] font-medium text-slate-300">Glossary — the words used on these screens</summary>
+        <div id="glossary" class="mt-3"></div>
+      </details>
 
       <details class="card">
         <summary class="cursor-pointer text-[13px] font-medium text-slate-300">Expected workbook layout</summary>
@@ -93,19 +93,13 @@
   <!-- ─────────── FIXING ─────────── -->
   <section class="pane" data-pane="fixing">
     <div class="mx-auto max-w-6xl space-y-4 p-5">
-      <div class="sec-head">
-        <h2>Multilateral FX fixing</h2>
-        <p>One shadow log-price per currency, estimated jointly by weighted least squares, so
-           <code>FX<sub>ij</sub> · FX<sub>jk</sub> = FX<sub>ik</sub></code> holds by construction rather than by luck (§8).
-           The participating network is fitted <em>alone</em>; the vehicle currency is attached afterwards as a
-           satellite and cannot move the internal matrix (§37).</p>
-      </div>
+      <div class="sec-head" data-copy="fixing"><h2>Working out the exchange rates</h2></div>
       <div id="fixStats" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"></div>
 
       <div class="card">
-        <h3 class="card-h">Rates quoted in BCC-T <span class="sect">§5, §37</span></h3>
-        <p class="hint mt-1">The primary quotation. Every bilateral below is
-          <code>V<sub>j</sub> / V<sub>i</sub></code> — no third currency is consulted to discover any pair.</p>
+        <h3 class="card-h">Exchange rates, quoted against BCC-T <span class="sect">§5, §37</span></h3>
+        <p class="hint mt-1">This is the master table. To get the rate between any two currencies, divide
+          one row by another — nothing else is needed, and no third currency gets a say.</p>
         <div id="pivotTable" class="mt-3 overflow-auto"></div>
         <div id="pivotNote" class="mt-3"></div>
       </div>
@@ -121,11 +115,7 @@
   <!-- ─────────── BASKET ─────────── -->
   <section class="pane" data-pane="basket">
     <div class="mx-auto max-w-6xl space-y-4 p-5">
-      <div class="sec-head">
-        <h2>BCC-T constitution</h2>
-        <p>A fixed quantity vector, capped and redistributed (§6). Quantities change only at a scheduled
-           reconstitution — never because a diagnostic moved (§4).</p>
-      </div>
+      <div class="sec-head" data-copy="basket"><h2>Building the BCC-T unit</h2></div>
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="card"><h3 class="card-h">Raw against capped weights</h3><div id="chartWeights" class="chart h-[320px]"></div></div>
         <div class="card"><h3 class="card-h">Value of one BCC-T unit</h3><div id="chartValues" class="chart h-[320px]"></div></div>
@@ -133,8 +123,9 @@
       <div class="card"><h3 class="card-h">Components</h3><div id="basketTable" class="mt-2 overflow-auto"></div></div>
       <div class="card">
         <h3 class="card-h">Self-reference attenuation <span class="sect">§7</span></h3>
-        <p class="hint mt-1">A basket that contains a currency cannot independently measure it. A shock to
-           currency <em>i</em> registers at only (1 − w<sub>i</sub>) of its true size.</p>
+        <p class="hint mt-1">A basket cannot fairly measure one of its own members. When the rupee falls, a
+           basket containing rupees falls with it — so the drop registers smaller than it really was, by
+           exactly the rupee's share of the basket.</p>
         <div id="selfRef" class="mt-3"></div>
       </div>
     </div>
@@ -143,11 +134,7 @@
   <!-- ─────────── DIAGNOSTICS ─────────── -->
   <section class="pane" data-pane="diagnostics">
     <div class="mx-auto max-w-6xl space-y-4 p-5">
-      <div class="sec-head">
-        <h2>BCC-D diagnostics</h2>
-        <p>Currency health and currency power are measured separately (§10, §14). Leading indicators move
-           before the outcome; lagging indicators confirm after it. Neither touches the basket.</p>
-      </div>
+      <div class="sec-head" data-copy="diagnostics"><h2>How each country is doing</h2></div>
 
       <div class="card">
         <div class="flex flex-wrap items-center gap-3">
@@ -167,9 +154,9 @@
 
       <div class="card">
         <h3 class="card-h">Excess international usage <span class="sect">§16</span></h3>
-        <p class="hint mt-1">The residual from CPS regressed on health, market depth and trade scale — an
-          estimate with a standard error, not an assertion. Subtracting CPS from CHS, which the framework
-          rejects, is not offered anywhere in this tool.</p>
+        <p class="hint mt-1">How much more, or less, a currency is used around the world than its economy and
+          its markets would lead you to expect. It comes with an error range, because it is an estimate and
+          not an accusation.</p>
         <div id="chartExcess" class="chart mt-3 h-[300px]"></div>
         <div id="excessTable" class="mt-3 overflow-auto"></div>
       </div>
@@ -179,11 +166,7 @@
   <!-- ─────────── NETTING ─────────── -->
   <section class="pane" data-pane="netting">
     <div class="mx-auto max-w-6xl space-y-4 p-5">
-      <div class="sec-head">
-        <h2>Multilateral netting</h2>
-        <p>Compression is an accounting identity (§19). What decides whether the design works is the size and
-           persistence of residual creditor balances (§20).</p>
-      </div>
+      <div class="sec-head" data-copy="netting"><h2>Settling everyone at once</h2></div>
       <div id="netStats" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"></div>
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="card"><h3 class="card-h">Gross, bilaterally netted and multilaterally netted</h3><div id="chartNetting" class="chart h-[320px]"></div></div>
@@ -211,11 +194,7 @@
   <!-- ─────────── INVOICE ─────────── -->
   <section class="pane" data-pane="invoice">
     <div class="mx-auto max-w-6xl space-y-4 p-5">
-      <div class="sec-head">
-        <h2>Invoice price</h2>
-        <p>Every currency unit charged is traceable to a named clause. Nothing is folded into an opaque
-           risk margin, and the dollar-intermediated route is priced beside it.</p>
-      </div>
+      <div class="sec-head" data-copy="invoice"><h2>What the invoice costs</h2></div>
 
       <div id="bookStats" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"></div>
 
@@ -242,8 +221,9 @@
           <div id="chartWaterfall" class="chart mt-2 h-[400px]"></div>
         </div>
         <div class="card lg:col-span-2">
-          <h3 class="card-h">Settlement infrastructure, compared</h3>
-          <p class="hint mt-1">Route-specific costs only. Interest carry and FX risk are identical on both routes and would otherwise swamp the difference.</p>
+          <h3 class="card-h">The plumbing, compared</h3>
+          <p class="hint mt-1">Only the costs that depend on how you route the payment. Interest and
+            exchange-rate risk are the same either way and would otherwise drown out the difference.</p>
           <div id="chartCompare" class="chart mt-1 h-[400px]"></div>
         </div>
       </div>
@@ -260,7 +240,7 @@
 
       <div class="card">
         <h3 class="card-h">Whole book</h3>
-        <p class="hint mt-1">Which component drives the cost across every invoice, not just the one selected above.</p>
+        <p class="hint mt-1">Which charge costs you most across all your invoices, not just the one above.</p>
         <div id="chartBookComponents" class="chart mt-2 h-[260px]"></div>
         <div id="bookTable" class="mt-3 overflow-auto"></div>
       </div>
@@ -275,13 +255,7 @@
   <!-- ─────────── WORKINGS ─────────── -->
   <section class="pane" data-pane="workings">
     <div class="mx-auto max-w-5xl space-y-4 p-5">
-      <div class="sec-head">
-        <h2>Workings</h2>
-        <p>Every published figure, derived again step by step — the formula, the numbers substituted
-           into it, and the result. Each chain is then reconciled against what the tool actually
-           published, so a derivation that has drifted from the code says so instead of reading
-           plausibly.</p>
-      </div>
+      <div class="sec-head" data-copy="workings"><h2>Show me the arithmetic</h2></div>
 
       <div class="card">
         <div class="flex flex-wrap items-center gap-2">
@@ -356,10 +330,11 @@
       </div>
 
       <div class="card">
-        <h3 class="card-h">Reference distributions <span class="sect">§11</span></h3>
-        <p class="hint mt-1">Fixed calibration constants. Set them once from a calibration sample and leave them
-          alone — that is what makes a score in 2035 mean what it meant in 2027. Cross-sectional min-max
-          scaling is deliberately not offered.</p>
+        <h3 class="card-h">Scoring yardsticks <span class="sect">§11</span></h3>
+        <p class="hint mt-1">The yardsticks each indicator is scored against. Set them once from a reference
+          period and then leave them alone — that is what lets you compare a score from this year against
+          one from ten years hence. Rescaling them against whoever happens to be in the data today would
+          mean one country having a bad year silently moved everybody else's score.</p>
         <div id="refTable" class="mt-3 max-h-80 overflow-auto"></div>
       </div>
 

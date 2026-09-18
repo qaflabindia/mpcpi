@@ -23,6 +23,7 @@ import { sanitiseDescription } from '../extension/agent/mcp.js';
 import { Agent, truncateResult } from '../extension/agent/agent.js';
 import { explainInvoice, explainBasket, explainFixing, explainIndicator, explainQuoteWeight, toText } from '../extension/core/explain.js';
 import { HELP } from '../extension/panel/help.js';
+import { SECTIONS, GLOSSARY } from '../extension/panel/copy.js';
 import { ToolRegistry } from '../extension/agent/tools.js';
 import { analyze } from '../extension/core/pipeline.js';
 import { ols, normInv, autocorr1 } from '../extension/core/num.js';
@@ -1097,6 +1098,62 @@ test('the help registry covers the figures the panel puts a mark on', () => {
   assert.ok(used.length >= 25, `only ${used.length} help marks are attached`);
   for (const key of new Set(used)) {
     assert.ok(HELP[key], `the panel references help "${key}", which is not in the registry`);
+  }
+});
+
+/* ── the explanations have to be readable ─────────────────────── */
+
+// Terms that mean nothing to a reader who has not read the paper. They are
+// allowed in the `precise` layer and in code comments; they are not allowed in
+// the text a newcomer meets first.
+const JARGON = [
+  'shadow log-price', 'weighted least squares', 'numeraire', 'Laplacian', 'winsoris',
+  'Herfindahl', 'cross-sectional', 'heteroske', 'stochastic', 'triangular consistency',
+  'quantity vector', 'attenuation', 'procyclical', 'hysteresis', 'reconstitution',
+  'autocorrelation', 'multilateral compression', 'accounting identity', 'regressed on',
+];
+const hasJargon = (text) => JARGON.filter((j) => new RegExp(j, 'i').test(text));
+
+test('every screen explains itself without jargon', () => {
+  for (const [key, c] of Object.entries(SECTIONS)) {
+    assert.ok(c.plain?.length >= 2, `${key} needs more than one sentence of explanation`);
+    const joined = c.plain.join(' ');
+    const leaks = hasJargon(joined);
+    assert.equal(leaks.length, 0, `${key} plain copy uses: ${leaks.join(', ')}`);
+    assert.ok(joined.split(/\s+/).length >= 50, `${key} plain copy is too thin to teach anything`);
+    assert.ok(c.precise, `${key} has no precise wording kept for the record`);
+  }
+});
+
+test('the precise wording is still available for every screen', () => {
+  // Plain language must not mean losing the exact statement — it is kept, one
+  // click away, so the implementation can still be checked against the paper.
+  for (const [key, c] of Object.entries(SECTIONS)) {
+    assert.ok(c.precise.length > 60, `${key} precise wording is too short to be the technical record`);
+    assert.match(c.precise, /§/, `${key} precise wording should cite the framework`);
+  }
+});
+
+test('every tooltip is written for someone seeing the figure for the first time', () => {
+  for (const [key, entry] of Object.entries(HELP)) {
+    const body = entry[1];
+    const leaks = hasJargon(body);
+    assert.equal(leaks.length, 0, `tooltip "${key}" uses: ${leaks.join(', ')}`);
+    assert.ok(body.split(/\s+/).length >= 12, `tooltip "${key}" is too terse to explain anything`);
+    assert.ok(/[.!?]$/.test(body.trim()), `tooltip "${key}" is not a complete sentence`);
+  }
+});
+
+test('the glossary covers the terms the copy cannot avoid', () => {
+  assert.ok(Object.keys(GLOSSARY).length >= 15, 'too few terms to be useful');
+  for (const [term, def] of Object.entries(GLOSSARY)) {
+    assert.ok(def.length >= 40, `"${term}" is defined too briefly`);
+    assert.equal(hasJargon(def).length, 0, `the definition of "${term}" uses jargon of its own`);
+    assert.ok(!new RegExp(`^${term}\\b`, 'i').test(def), `"${term}" is defined using itself`);
+  }
+  // the words a newcomer will certainly hit
+  for (const must of ['basis point', 'BCC-T', 'spread', 'settlement', 'netting', 'hedge']) {
+    assert.ok(GLOSSARY[must], `the glossary is missing "${must}"`);
   }
 });
 

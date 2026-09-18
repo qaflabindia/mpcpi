@@ -19,6 +19,7 @@ import { buildTools } from '../agent/tools.js';
 import { Agent, SUGGESTED_PROMPTS } from '../agent/agent.js';
 import * as EX from '../core/explain.js';
 import { helpMark, installHelp } from './help.js';
+import { SECTIONS, GLOSSARY } from './copy.js';
 import * as CH from './charts.js';
 
 /* ─────────────────────────── state ─────────────────────────── */
@@ -130,6 +131,8 @@ async function boot() {
 
   // 1. Everything that needs no async work, wired before anything can be clicked.
   installHelp();
+  renderSectionCopy();
+  renderGlossary();
   await applyStoredTheme();
   wireTheme();
   wireTabs();
@@ -204,6 +207,49 @@ const yieldToPaint = (ms = 32) => new Promise((resolve) => {
 
 /** Same hazard for chart sizing: fall back to a timer when rAF is asleep. */
 const afterPaint = (fn) => { yieldToPaint(0).then(fn); };
+
+/* ─────────────────────────── explanatory copy ─────────────────────────── */
+
+/**
+ * Plain English first, with the exact technical wording behind a toggle.
+ *
+ * The screens used to open with the precise statement, which reads as gibberish
+ * unless you have already read the paper. Both audiences are real; only one of
+ * them was being served.
+ */
+function renderSectionCopy() {
+  for (const host of document.querySelectorAll('[data-copy]')) {
+    const c = SECTIONS[host.dataset.copy];
+    if (!c) continue;
+    host.innerHTML = '';
+    if (!host.querySelector('h2') && host.dataset.copy !== 'data') {
+      host.append(el('h2', '', esc(c.title)));
+    } else if (host.dataset.copy !== 'data') {
+      host.append(el('h2', '', esc(c.title)));
+    }
+    for (const para of c.plain) host.append(el('p', '', esc(para)));
+
+    const d = el('details', 'mt-2');
+    const sum = el('summary', 'cursor-pointer text-[11.5px] select-none');
+    sum.style.color = 'var(--faint)';
+    sum.textContent = 'the precise wording, for the record';
+    d.append(sum);
+    const pre = el('p', 'mt-1 text-[11.5px] leading-relaxed');
+    pre.style.color = 'var(--muted)';
+    pre.textContent = c.precise;
+    d.append(pre);
+    host.append(d);
+  }
+}
+
+function renderGlossary() {
+  const host = $('glossary');
+  if (!host) return;
+  host.replaceChildren(table([
+    { label: 'term', get: (r) => `<b>${esc(r[0])}</b>` },
+    { label: 'what it means', get: (r) => `<span class="whitespace-normal">${esc(r[1])}</span>` },
+  ], Object.entries(GLOSSARY)));
+}
 
 /* ─────────────────────────── theme ─────────────────────────── */
 
@@ -500,13 +546,13 @@ function renderFixing() {
     ], pv.rows));
     pvNote.append(el('div', `note ${pv.reconstruction.lossless ? 'note-ok' : 'note-bad'}`,
       pv.reconstruction.lossless
-        ? `Every bilateral rate below reconstructs exactly from this table as <code>V<sub>j</sub> / V<sub>i</sub></code> (max error ${pv.reconstruction.maxErrorBps.toExponential(1)} bps). ${esc(pv.reconstruction.note)}`
+        ? `Checked: every exchange rate in this tool can be rebuilt from the table above by simple division, with no error at all (${pv.reconstruction.maxErrorBps.toExponential(1)} bps). That is what it means for the dollar not to be needed.`
         : `Re-anchoring does not reproduce the fitted rates — worst pair ${esc(pv.reconstruction.worstPair)} at ${pv.reconstruction.maxErrorBps} bps.`));
     const dep = S.result.dependency?.evidence;
     if (dep) {
       pvNote.append(el('div', 'note note-info mt-2',
-        `Internal matrix fitted from ${esc(dep.internalMatrixFittedFrom ?? '—')}.` +
-        (dep.externalSatellites?.length ? ` ${esc(dep.externalSatellites.join(', '))} ${dep.externalSatellites.length === 1 ? 'is a satellite' : 'are satellites'}: quotable and payable, but with no influence on any participating cross.` : '')));
+        `The rates between members were worked out from ${esc(dep.internalMatrixFittedFrom ?? '—')}.` +
+        (dep.externalSatellites?.length ? ` ${esc(dep.externalSatellites.join(', '))} can still be quoted and paid in, but ${dep.externalSatellites.length === 1 ? 'it had' : 'they had'} no say in the rates between the members.` : '')));
     }
   }
 
@@ -574,7 +620,7 @@ function renderBasket() {
     { label: 'attenuation', num: true, get: (r) => `<span class="${r.attenuationPct > 20 ? 'text-amber-400' : 'text-slate-400'}">${fmt(r.attenuationPct, 1)}%</span>` },
     { label: 'reading', get: (r) => `<span class="text-slate-500">${esc(r.explanation)}</span>` },
   ], S.result.selfReference || []));
-  sr.append(el('div', 'note note-info mt-3', 'This is why the tool publishes an own-currency-excluded strength index separately. Supply a base-date fixing in the config to populate it.'));
+  sr.append(el('div', 'note note-info mt-3', 'This is why a separate index measures each currency against the OTHERS only, leaving itself out. Supply a starting-date set of rates in the settings to see it.'));
 }
 
 /* ─────────────────────────── diagnostics tab ─────────────────────────── */

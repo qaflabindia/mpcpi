@@ -39,10 +39,11 @@
 
   <section class="card">
     <h2 class="card-h">Import keys from a file</h2>
-    <p class="hint mt-1">Pick or paste a file holding your keys — <code># Label</code> headings,
-      <code>NAME=value</code> or <code>label: value</code> all parse. Everything happens in this page:
-      the file is read locally, each key is handed straight to extension storage, and nothing is
-      logged, written to the database or included in an export. Keys are shown masked.</p>
+    <p class="hint mt-1">Point this at a file of API keys and it will sort them out for you — headings,
+      <code>NAME=value</code> lines and <code>label: value</code> lines all work. Everything happens on
+      your machine: the file is read here, each key goes straight into the browser's own storage, and
+      nothing is written to the database, the logs or any export. Keys are shown partly hidden so you
+      can check them without exposing them.</p>
 
     <div class="mt-3 flex flex-wrap items-center gap-2">
       <input id="keyFile" type="file" accept=".md,.txt,.env,.json,.yaml,.yml"

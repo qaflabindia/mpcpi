@@ -35,7 +35,9 @@
   .hint { @apply text-[11.5px] leading-relaxed; color: var(--muted); }
 
   .sec-head h2 { @apply text-lg font-semibold; color: var(--text); }
-  .sec-head p  { @apply mt-1 max-w-3xl text-[12.5px] leading-relaxed; color: var(--muted); }
+  .sec-head p  { @apply mt-2 max-w-3xl text-[13px] leading-relaxed; color: var(--text-2); }
+  .sec-head p:first-of-type { @apply mt-1; }
+  .sec-head details p { @apply mt-1 text-[11.5px]; color: var(--muted); }
 
   .inp {
     @apply w-full rounded-md px-2.5 py-1.5 text-[12.5px] focus:outline-none;
