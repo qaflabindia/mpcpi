@@ -186,6 +186,25 @@ async function boot() {
 
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
+/**
+ * Yield so the browser can paint the "computing…" state before a long
+ * synchronous run.
+ *
+ * requestAnimationFrame alone is not safe here: a hidden or backgrounded tab
+ * never fires it, so awaiting it hangs the analysis forever and the panel sits
+ * at "computing…". The panel lives in an iframe that is routinely not visible.
+ * Race it against a timer so the work always proceeds.
+ */
+const yieldToPaint = (ms = 32) => new Promise((resolve) => {
+  let done = false;
+  const finish = () => { if (!done) { done = true; resolve(); } };
+  try { requestAnimationFrame(finish); } catch { /* no rAF in this context */ }
+  setTimeout(finish, ms);
+});
+
+/** Same hazard for chart sizing: fall back to a timer when rAF is asleep. */
+const afterPaint = (fn) => { yieldToPaint(0).then(fn); };
+
 /* ─────────────────────────── theme ─────────────────────────── */
 
 /**
@@ -243,7 +262,7 @@ function showTab(name) {
   if (!name) return;   // never leave the panel with no active pane
   for (const b of document.querySelectorAll('.tab[data-tab]')) b.classList.toggle('tab-active', b.dataset.tab === name);
   for (const p of document.querySelectorAll('.pane')) p.classList.toggle('active', p.dataset.pane === name);
-  requestAnimationFrame(() => CH.resizeAll());
+  afterPaint(() => CH.resizeAll());
 }
 
 /* ─────────────────────────── data loading ─────────────────────────── */
@@ -395,7 +414,7 @@ async function run(patch = {}) {
   if (!S.tables) { toast('Load a workbook first.'); return null; }
   S.config = { ...S.config, ...patch };
   status('computing…');
-  await new Promise((r) => requestAnimationFrame(r));
+  await yieldToPaint();
 
   const v = validateTables(S.tables);
   const t0 = performance.now();
@@ -440,7 +459,7 @@ function renderAll() {
   renderDiagnostics();
   renderNetting();
   renderInvoice();
-  requestAnimationFrame(() => CH.resizeAll());
+  afterPaint(() => CH.resizeAll());
 }
 
 /* ─────────────────────────── fixing tab ─────────────────────────── */
@@ -1207,7 +1226,9 @@ function currentDerivation() {
   if (!r) return { error: 'nothing loaded' };
   if (kind === 'invoice') {
     const inv = r.book?.priced?.find((p) => p.tradeId === arg);
-    return inv ? EX.explainInvoice(inv) : { error: `no invoice ${arg}` };
+    // The basket and fixing let the numeraire steps show their actual terms
+    // rather than a symbolic SUM.
+    return inv ? EX.explainInvoice(inv, { basket: r.basket, fixing: r.fixing }) : { error: `no invoice ${arg}` };
   }
   if (kind === 'fixing') return EX.explainFixing(r.fixing, arg || null);
   if (kind === 'basket') return EX.explainBasket(r.basket, r.fixing);
@@ -1245,7 +1266,15 @@ function renderWorkings() {
 
   stepsBox.append(el('h3', 'text-[14px] font-semibold text-slate-100 mb-1', esc(d.title)));
 
+  let group = null;
   for (const s of d.steps) {
+    if (s.group && s.group !== group) {
+      group = s.group;
+      const h = el('div', 'flex items-center gap-2 pt-3 pb-1');
+      h.innerHTML = `<span class="text-[12px] font-semibold uppercase tracking-wide text-cyan-300">${esc(group)}</span>
+        <span class="h-px flex-1" style="background:var(--border)"></span>`;
+      stepsBox.append(h);
+    }
     const card = el('div', 'rounded-lg border border-slate-800 bg-slate-900/50 p-3');
     const head = el('div', 'flex items-baseline gap-2');
     head.innerHTML = `<span class="inline-grid h-5 w-5 shrink-0 place-items-center rounded-full bg-slate-800 text-[11px] font-semibold text-cyan-300">${s.n}</span>

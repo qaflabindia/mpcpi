@@ -29,9 +29,9 @@ const fmt = (v, d = 6) => {
   return Number(v.toFixed(d)).toLocaleString(undefined, { maximumFractionDigits: d });
 };
 
-/** One step of working. */
-const step = (n, title, { section = null, formula = null, substitution = null, result = null, unit = null, note = null, rows = null }) =>
-  ({ n, title, section, formula, substitution, result, unit, note, rows });
+/** One step of working. `group` heads a run of related steps in the UI. */
+const step = (n, title, { section = null, formula = null, substitution = null, result = null, unit = null, note = null, rows = null, group = null }) =>
+  ({ n, title, section, formula, substitution, result, unit, note, rows, group });
 
 /**
  * Compare a recomputed value against what the pipeline published.
@@ -299,111 +299,307 @@ export function explainInvoice(invoice, ctx = {}) {
   const line = (k) => invoice.lines.find((l) => l.key === k);
   const bcct = (k) => line(k)?.amountBCCT ?? 0;
   const base = invoice.base.bcct;
+  const vSell = invoice.numeraire.valueInSeller;
+  const vBuy = invoice.numeraire.valueInBuyer;
+  const usd = invoice.usdRoute;
+  const cmp = invoice.comparison;
+  const vehicle = usd?.vehicle || 'USD';
 
-  const steps = [
-    step(1, 'Commercial base in the seller currency', {
-      section: '§5',
-      formula: inp.qty && inp.unit ? 'base = quantity × unitPrice' : 'base = amount as supplied',
-      substitution: inp.qty && inp.unit ? `${fmt(inp.qty, 0)} × ${fmt(inp.unit, 4)}` : fmt(invoice.base.local, 2),
-      result: invoice.base.local, unit: invoice.sellerCurrency,
-    }),
-    step(2, 'Convert to the BCC-T numeraire', {
-      section: '§5, §8',
-      formula: 'base_BCCT = base_local / V_seller,   V_seller = SUM_i q_i * FX_i,seller',
-      substitution: `${fmt(invoice.base.local, 2)} / ${fmt(invoice.numeraire.valueInSeller, 6)}`,
-      result: base, unit: 'BCC-T',
-    }),
-    step(3, 'Covered-interest carry to settlement', {
-      section: '§23',
-      formula: 'F/S = (1 + i_buyer·T/basis) / (1 + i_seller·T/basis);  adj = base × (F/S − 1)',
-      substitution: `T = ${invoice.settlementDays}d, basis = ${cfg.dayCountBasis}  →  ${fmt(line('forwardAdj')?.bps ?? 0, 2)} bps`,
-      result: bcct('forwardAdj'), unit: 'BCC-T',
-      note: 'Route-independent: routing a payment differently does not change the interest differential between the two currencies.',
-    }),
-    step(4, 'Unhedged FX premium', {
-      section: '§23',
-      formula: 'premium = base × z × sigma × sqrt(T/252) × (1 − hedgeRatio)',
-      substitution: inp.sigma
-        ? `${fmt(base, 2)} × ${fmt(normInv(cfg.confidenceLevel), 4)} × ${fmt(inp.sigma, 4)} × sqrt(${invoice.settlementDays}/252) × (1 − ${inp.hedge})`
-        : 'no volatility input — omitted, which understates both routes',
-      result: bcct('volPremium'), unit: 'BCC-T',
-      note: 'Also route-independent, and on a volatile pair it dwarfs everything else — which is why it is excluded from the route comparison.',
-    }),
-    step(5, 'Counterparty condition', {
-      section: '§15',
-      formula: 'adj = base × sensitivity × (neutral − composite)',
-      substitution: invoice.composite
-        ? `${fmt(base, 2)} × ${cfg.compositeSensitivity} × (${cfg.compositeNeutral} − ${fmt(invoice.composite.index, 2)})`
-        : 'no indicators supplied',
-      result: bcct('compositeAdj'), unit: 'BCC-T',
-    }),
-    step(6, 'Conversion inside the participating network', {
-      section: '§8, §28',
-      formula: 'cost = base × spreadBps / 10000,  spread from the cheapest path that does NOT transit the vehicle',
-      substitution: `${fmt(base, 2)} × ${fmt(inp.directSpreadBps, 3)} / 10000   [${line('fxConversion')?.detail ?? ''}]`,
-      result: bcct('fxConversion'), unit: 'BCC-T',
-    }),
-    step(7, 'Counterparty credit at the CCP', {
-      section: '§25',
-      formula: 'charge = base × PD(band, T) × LGD',
-      substitution: `${fmt(base, 2)} × ${fmt(inp.pd, 8)} × ${cfg.directRoute.lgd}   [band ${invoice.band.code}, PD ${fmt(BANDS[invoice.band.code]?.pdAnnual ?? 0, 4)}/yr × ${invoice.settlementDays}/365]`,
-      result: bcct('creditCharge'), unit: 'BCC-T',
-    }),
-    step(8, 'Initial-margin funding', {
-      section: '§18, §25',
-      formula: 'cost = base × IM × bandMultiplier × fundingRate × T/basis',
-      substitution: `${fmt(base, 2)} × ${cfg.initialMarginRate} × ${BANDS[invoice.band.code]?.marginMultiplier ?? 1} × ${cfg.fundingRate} × ${invoice.settlementDays}/${cfg.dayCountBasis}`,
-      result: bcct('marginFunding'), unit: 'BCC-T',
-    }),
-    step(9, 'Clearing fee', {
-      section: '§18',
-      formula: 'fee = base × feeBps / 10000',
-      substitution: `${fmt(base, 2)} × ${cfg.clearingFeeBps} / 10000`,
-      result: bcct('clearingFee'), unit: 'BCC-T',
-    }),
-    step(10, 'Netting rebate', {
-      section: '§19',
-      formula: 'rebate = − base × efficiency × passThrough × liquidityRate × settlementCycle/basis',
-      substitution: `− ${fmt(base, 2)} × ${fmt(inp.eta, 4)} × ${cfg.nettingRebateShare} × ${cfg.liquidityCostRate} × ${cfg.settlementCycleDays}/${cfg.dayCountBasis}`,
-      result: bcct('nettingRebate'), unit: 'BCC-T',
-      note: 'Over the settlement CYCLE, not the credit period: nobody funds the settlement amount for the life of the invoice.',
-    }),
-    step(11, 'Wrong-way loading', {
-      section: '§24',
-      formula: 'charge = base × PD × wrongWayAddon',
-      substitution: `${fmt(base, 2)} × ${fmt(inp.pd, 8)} × ${fmt(inp.wrongWayAddon, 4)}`,
-      result: bcct('wrongWaySurcharge'), unit: 'BCC-T',
-      note: 'An increment to the credit charge — the correlation loading only. Concentration breaches restrict credit capacity instead, and charging them here as well was double counting.',
-    }),
-  ];
+  const steps = [];
+  let n = 0;
+  const add = (title, opts) => { steps.push(step(++n, title, opts)); };
 
-  const sum = invoice.lines.reduce((s, l) => s + l.amountBCCT, 0);
-  steps.push(step(12, 'Add them up', {
-    formula: 'invoice = base + carry + premium + counterparty + conversion + credit + margin + clearing − netting + wrongWay',
-    substitution: invoice.lines.map((l) => `${l.amountBCCT < 0 ? '−' : '+'}${fmt(Math.abs(l.amountBCCT), 2)}`).join(' '),
+  /* ── A. the numeraire, derived rather than assumed ───────────────────── */
+  const G_NUM = `The numeraire — what one BCC-T is worth on each side`;
+
+  const basketTerms = (code) => (ctx.basket
+    ? Object.entries(ctx.basket.quantities).map(([c, q]) => `${fmt(q, 4)}×${fmt(ctx.fixing?.rate(c, code) ?? NaN, 6)}`).join(' + ')
+    : `SUM over the ${invoice.numeraire.basketVersion ? 'basket' : ''} components`);
+
+  add(`One BCC-T in ${invoice.sellerCurrency} (the seller's currency)`, {
+    group: G_NUM, section: '§5',
+    formula: `V_${invoice.sellerCurrency} = SUM_i q_i × FX_i,${invoice.sellerCurrency}`,
+    substitution: basketTerms(invoice.sellerCurrency),
+    result: vSell, unit: invoice.sellerCurrency,
+    note: 'The fixed quantity vector valued at this fixing. Anyone holding the published quantities and rates reproduces this number.',
+  });
+  add(`One BCC-T in ${invoice.buyerCurrency} (the destination currency)`, {
+    group: G_NUM, section: '§5',
+    formula: `V_${invoice.buyerCurrency} = SUM_i q_i × FX_i,${invoice.buyerCurrency}`,
+    substitution: basketTerms(invoice.buyerCurrency),
+    result: vBuy, unit: invoice.buyerCurrency,
+    note: `Every figure below is converted to the destination currency with this one number. The implied cross is ${invoice.sellerCurrency}/${invoice.buyerCurrency} = V_${invoice.buyerCurrency} / V_${invoice.sellerCurrency} = ${fmt(vBuy / vSell, 6)}.`,
+  });
+
+  /* ── B. commercial base ──────────────────────────────────────────────── */
+  const G_BASE = 'The commercial base';
+  add('Commercial base in the seller currency', {
+    group: G_BASE, section: '§5',
+    formula: inp.qty && inp.unit ? 'base = quantity × unitPrice' : 'base = amount as supplied',
+    substitution: inp.qty && inp.unit ? `${fmt(inp.qty, 0)} × ${fmt(inp.unit, 4)}` : fmt(invoice.base.local, 2),
+    result: invoice.base.local, unit: invoice.sellerCurrency,
+  });
+  add('Convert it to the BCC-T numeraire', {
+    group: G_BASE, section: '§5, §8',
+    formula: `base_BCCT = base_local / V_${invoice.sellerCurrency}`,
+    substitution: `${fmt(invoice.base.local, 2)} / ${fmt(vSell, 6)}`,
+    result: base, unit: 'BCC-T',
+  });
+  add(`The same base seen by the buyer`, {
+    group: G_BASE,
+    formula: `base_${invoice.buyerCurrency} = base_BCCT × V_${invoice.buyerCurrency}`,
+    substitution: `${fmt(base, 4)} × ${fmt(vBuy, 6)}`,
+    result: base * vBuy, unit: invoice.buyerCurrency,
+    note: 'What the goods alone are worth to the importer, before any settlement cost. Both routes below start here.',
+  });
+
+  /* ── C. common to both routes ────────────────────────────────────────── */
+  const G_COMMON = 'Costs common to BOTH routes — these cancel in the comparison';
+  add('Covered-interest carry to settlement', {
+    group: G_COMMON, section: '§23',
+    formula: 'F/S = (1 + i_buyer·T/basis) / (1 + i_seller·T/basis);  adj = base × (F/S − 1)',
+    substitution: `T = ${invoice.settlementDays}d, basis = ${cfg.dayCountBasis}  →  ${fmt(line('forwardAdj')?.bps ?? 0, 2)} bps`,
+    result: bcct('forwardAdj'), unit: 'BCC-T',
+    note: 'Routing a payment differently does not change the interest differential between the two currencies.',
+  });
+  add('Unhedged FX premium', {
+    group: G_COMMON, section: '§23',
+    formula: 'premium = base × z × sigma × sqrt(T/252) × (1 − hedgeRatio)',
+    substitution: inp.sigma
+      ? `${fmt(base, 2)} × ${fmt(normInv(cfg.confidenceLevel), 4)} × ${fmt(inp.sigma, 4)} × sqrt(${invoice.settlementDays}/252) × (1 − ${inp.hedge})`
+      : 'no volatility input — omitted, which understates both routes',
+    result: bcct('volPremium'), unit: 'BCC-T',
+    note: 'On a volatile pair this dwarfs every settlement cost below, which is why it is excluded from the route comparison.',
+  });
+  add('Counterparty condition', {
+    group: G_COMMON, section: '§15',
+    formula: 'adj = base × sensitivity × (neutral − composite)',
+    substitution: invoice.composite
+      ? `${fmt(base, 2)} × ${cfg.compositeSensitivity} × (${cfg.compositeNeutral} − ${fmt(invoice.composite.index, 2)})`
+      : 'no indicators supplied',
+    result: bcct('compositeAdj'), unit: 'BCC-T',
+  });
+  const commonTotal = bcct('forwardAdj') + bcct('volPremium') + bcct('compositeAdj');
+  add('Common subtotal', {
+    group: G_COMMON,
+    formula: 'carry + premium + counterparty',
+    substitution: `${fmt(bcct('forwardAdj'), 2)} + ${fmt(bcct('volPremium'), 2)} + ${fmt(bcct('compositeAdj'), 2)}`,
+    result: commonTotal, unit: 'BCC-T',
+    note: `${fmt((commonTotal / base) * 1e4, 1)} bps of the base — identical on both routes.`,
+  });
+
+  /* ── D. the direct route ─────────────────────────────────────────────── */
+  const G_DIRECT = 'BCC-T direct — clearing inside the participating network';
+  add('Conversion inside the participating network', {
+    group: G_DIRECT, section: '§8, §28',
+    formula: 'cost = base × spreadBps / 10000, along the cheapest path that does NOT transit the vehicle',
+    substitution: `${fmt(base, 2)} × ${fmt(inp.directSpreadBps, 3)} / 10000   [${line('fxConversion')?.detail ?? ''}]`,
+    result: bcct('fxConversion'), unit: 'BCC-T',
+  });
+  add('Counterparty credit at the CCP', {
+    group: G_DIRECT, section: '§25',
+    formula: 'charge = base × PD(band, T) × LGD',
+    substitution: `${fmt(base, 2)} × ${fmt(inp.pd, 8)} × ${cfg.directRoute.lgd}   [band ${invoice.band.code}, PD ${fmt(BANDS[invoice.band.code]?.pdAnnual ?? 0, 4)}/yr × ${invoice.settlementDays}/365]`,
+    result: bcct('creditCharge'), unit: 'BCC-T',
+    note: 'A central counterparty stands between the parties and holds margin, so loss given default is lower than on a bare bilateral exposure.',
+  });
+  add('Initial-margin funding', {
+    group: G_DIRECT, section: '§18, §25',
+    formula: 'cost = base × IM × bandMultiplier × fundingRate × T/basis',
+    substitution: `${fmt(base, 2)} × ${cfg.initialMarginRate} × ${BANDS[invoice.band.code]?.marginMultiplier ?? 1} × ${cfg.fundingRate} × ${invoice.settlementDays}/${cfg.dayCountBasis}`,
+    result: bcct('marginFunding'), unit: 'BCC-T',
+    note: 'The price of that margin: it has to be funded for the life of the cleared obligation.',
+  });
+  add('Clearing fee', {
+    group: G_DIRECT, section: '§18',
+    formula: 'fee = base × feeBps / 10000',
+    substitution: `${fmt(base, 2)} × ${cfg.clearingFeeBps} / 10000`,
+    result: bcct('clearingFee'), unit: 'BCC-T',
+  });
+  add('Netting rebate', {
+    group: G_DIRECT, section: '§19',
+    formula: 'rebate = − base × efficiency × passThrough × liquidityRate × settlementCycle/basis',
+    substitution: `− ${fmt(base, 2)} × ${fmt(inp.eta, 4)} × ${cfg.nettingRebateShare} × ${cfg.liquidityCostRate} × ${cfg.settlementCycleDays}/${cfg.dayCountBasis}`,
+    result: bcct('nettingRebate'), unit: 'BCC-T',
+    note: 'Over the settlement CYCLE, not the credit period: nobody funds the settlement amount for the life of the invoice.',
+  });
+  add('Wrong-way loading', {
+    group: G_DIRECT, section: '§24',
+    formula: 'charge = base × PD × wrongWayAddon',
+    substitution: `${fmt(base, 2)} × ${fmt(inp.pd, 8)} × ${fmt(inp.wrongWayAddon, 4)}`,
+    result: bcct('wrongWaySurcharge'), unit: 'BCC-T',
+  });
+  const directInfra = ['fxConversion', 'creditCharge', 'marginFunding', 'clearingFee', 'nettingRebate', 'wrongWaySurcharge'].reduce((a, k) => a + bcct(k), 0);
+  add('Direct infrastructure subtotal', {
+    group: G_DIRECT,
+    formula: 'conversion + credit + margin + clearing − netting + wrong-way',
+    substitution: ['fxConversion', 'creditCharge', 'marginFunding', 'clearingFee', 'nettingRebate', 'wrongWaySurcharge'].map((k) => `${bcct(k) < 0 ? '−' : '+'}${fmt(Math.abs(bcct(k)), 2)}`).join(' '),
+    result: directInfra, unit: 'BCC-T',
+    note: `${fmt((directInfra / base) * 1e4, 2)} bps of the base.`,
+  });
+
+  /* ── E. the total, in every currency the user cares about ────────────── */
+  const G_TOTAL = 'The invoice price';
+  const sum = invoice.lines.reduce((a, l) => a + l.amountBCCT, 0);
+  add('Add everything up', {
+    group: G_TOTAL,
+    formula: 'invoice = base + common + direct infrastructure',
+    substitution: `${fmt(base, 2)} + ${fmt(commonTotal, 2)} + ${fmt(directInfra, 2)}`,
     result: sum, unit: 'BCC-T',
-  }));
-  steps.push(step(13, 'Restate in the buyer currency', {
-    formula: 'invoice_buyer = invoice_BCCT × V_buyer',
-    substitution: `${fmt(sum, 4)} × ${fmt(invoice.numeraire.valueInBuyer, 6)}`,
-    result: sum * invoice.numeraire.valueInBuyer, unit: invoice.buyerCurrency,
-  }));
-  steps.push(step(14, 'Spread over the commercial base', {
+  });
+  add(`Restate in ${invoice.sellerCurrency} — what the exporter receives`, {
+    group: G_TOTAL,
+    formula: `invoice_${invoice.sellerCurrency} = invoice_BCCT × V_${invoice.sellerCurrency}`,
+    substitution: `${fmt(sum, 4)} × ${fmt(vSell, 6)}`,
+    result: sum * vSell, unit: invoice.sellerCurrency,
+  });
+  add(`Restate in ${invoice.buyerCurrency} — WHAT THE IMPORTER PAYS`, {
+    group: G_TOTAL,
+    formula: `invoice_${invoice.buyerCurrency} = invoice_BCCT × V_${invoice.buyerCurrency}`,
+    substitution: `${fmt(sum, 4)} × ${fmt(vBuy, 6)}`,
+    result: sum * vBuy, unit: invoice.buyerCurrency,
+    note: `Against a commercial base of ${fmt(base * vBuy, 2)} ${invoice.buyerCurrency}, so the settlement adds ${fmt(sum * vBuy - base * vBuy, 2)} ${invoice.buyerCurrency}.`,
+  });
+  add('Spread over the commercial base', {
+    group: G_TOTAL,
     formula: 'spread = (invoice − base) / base × 10000',
     substitution: `(${fmt(sum, 2)} − ${fmt(base, 2)}) / ${fmt(base, 2)} × 10000`,
     result: ((sum - base) / base) * 1e4, unit: 'bps',
-  }));
+  });
+
+  /* ── F. the incumbent route, derived the same way ────────────────────── */
+  const checks = [
+    { what: 'components sum to the published price', ...reconcile(sum, invoice.invoicePrice.bcct, { decimals: 6 }) },
+    { what: `restatement in ${invoice.buyerCurrency}`, ...reconcile(sum * vBuy, invoice.invoicePrice.inBuyerCurrency, { decimals: 4 }) },
+    { what: 'spread over base', ...reconcile(((sum - base) / base) * 1e4, invoice.invoicePrice.spreadOverBaseBps, { decimals: 3 }) },
+  ];
+
+  if (usd?.available) {
+    const G_USD = `The incumbent route — settling through ${vehicle}`;
+    const uline = (k) => usd.lines.find((l) => l.key === k);
+    const u = (k) => uline(k)?.amountBCCT ?? 0;
+    const uc = cfg.usdRoute;
+
+    add(`Convert ${invoice.sellerCurrency} → ${vehicle} → ${invoice.buyerCurrency}`, {
+      group: G_USD,
+      formula: 'cost = base × (spread of leg 1 + spread of leg 2) / 10000',
+      substitution: `${fmt(base, 2)} × ${uline('fxConversion')?.detail ?? ''} / 10000`,
+      result: u('fxConversion'), unit: 'BCC-T',
+      note: `Two conversions instead of one. The ${vehicle} legs are usually tighter than a participating cross, which is the incumbent's real advantage.`,
+    });
+    add('Settlement fees, both legs', {
+      group: G_USD,
+      formula: 'fee = base × 2 × feePerLeg / 10000',
+      substitution: `${fmt(base, 2)} × 2 × ${uc.settlementFeePerLegBps} / 10000`,
+      result: u('settlementFees'), unit: 'BCC-T',
+    });
+    add('Correspondent bank charges', {
+      group: G_USD,
+      formula: `cost = 2 × flatFee × FX_${vehicle},${invoice.sellerCurrency} / V_${invoice.sellerCurrency}`,
+      substitution: `2 × ${uc.correspondentFeeFlat} ${vehicle}, restated in BCC-T`,
+      result: u('correspondentFees'), unit: 'BCC-T',
+      note: 'A flat fee is regressive: it bites on a small invoice and vanishes on a large one.',
+    });
+    add('Bilateral counterparty credit', {
+      group: G_USD, section: '§18',
+      formula: 'charge = base × PD(band, T) × LGD_bilateral',
+      substitution: `${fmt(base, 2)} × ${fmt(inp.pd, 8)} × ${uc.bilateralLgd}`,
+      result: u('counterpartyCredit'), unit: 'BCC-T',
+      note: `The SAME importer, over the SAME horizon, as the CCP charge above — but unmargined and with nobody interposed, so loss given default is ${uc.bilateralLgd} rather than ${cfg.directRoute.lgd}. This is the single largest difference between the two routes.`,
+    });
+    add('In-flight exposure to the correspondent banks', {
+      group: G_USD, section: '§18',
+      formula: 'charge = base × PD_bank × (days / 365) × LGD × banks',
+      substitution: `${fmt(base, 2)} × ${uc.correspondentPdAnnual} × ${uc.correspondentExposureDays}/365 × ${uc.correspondentLgd} × ${uc.correspondentCount}`,
+      result: u('correspondentCredit'), unit: 'BCC-T',
+      note: 'Only while the payment is in flight — the commercial credit period is exposure to the importer, charged above.',
+    });
+    add('Principal risk: no payment-versus-payment', {
+      group: G_USD, section: '§18, §23',
+      formula: 'charge = base × PD_bank × (days / 365) × LGD_principal',
+      substitution: `${fmt(base, 2)} × ${uc.correspondentPdAnnual} × ${uc.principalRiskDays}/365 × ${uc.principalLgd}`,
+      result: u('principalRisk'), unit: 'BCC-T',
+      note: 'Priced as EXPECTED loss, which understates it: Herstatt risk is a tail and systemic exposure. The figure is not inflated to compensate.',
+    });
+    add('Nostro funding over the extra settlement day', {
+      group: G_USD,
+      formula: 'cost = base × fundingRate × extraDays / basis',
+      substitution: `${fmt(base, 2)} × ${cfg.fundingRate} × ${uc.extraSettlementDays}/${cfg.dayCountBasis}`,
+      result: u('nostroFloat'), unit: 'BCC-T',
+    });
+    add('Netting benefit', {
+      group: G_USD, section: '§19',
+      formula: 'none — correspondent banking settles gross',
+      substitution: 'no multilateral compression is available on this route',
+      result: 0, unit: 'BCC-T',
+      note: `The direct route credited ${fmt(Math.abs(bcct('nettingRebate')), 2)} BCC-T here.`,
+    });
+
+    const usdInfra = usd.lines.reduce((a, l) => a + l.amountBCCT, 0);
+    add(`${vehicle} infrastructure subtotal`, {
+      group: G_USD,
+      formula: 'conversion + fees + correspondent + credit + principal + nostro',
+      substitution: usd.lines.map((l) => `+${fmt(l.amountBCCT, 2)}`).join(' '),
+      result: usdInfra, unit: 'BCC-T',
+      note: `${fmt((usdInfra / base) * 1e4, 2)} bps of the base.`,
+    });
+    add(`What the importer pays on the ${vehicle} route`, {
+      group: G_USD,
+      formula: `all-in = (base + common@T+${usd.settlementDays} + ${vehicle} infrastructure) × V_${invoice.buyerCurrency}`,
+      substitution: `(${fmt(base, 2)} + ${fmt(usd.commonBCCT, 2)} + ${fmt(usdInfra, 2)}) × ${fmt(vBuy, 6)}`,
+      result: usd.allInBCCT * vBuy, unit: invoice.buyerCurrency,
+      note: `The common block is ${fmt(usd.commonBCCT - commonTotal, 2)} BCC-T larger than on the direct route, because the incumbent settles ${uc.extraSettlementDays} day later and carries one more day of unhedged FX risk.`,
+    });
+
+    /* ── G. the comparison ────────────────────────────────────────────── */
+    const G_CMP = 'The comparison';
+    const d = cmp.differential;
+    add('Set aside what is identical on both routes', {
+      group: G_CMP, section: '§28',
+      formula: 'common = carry + FX premium + counterparty condition',
+      substitution: `${fmt(commonTotal, 2)} BCC-T = ${fmt(d.commonToBothBps, 1)} bps`,
+      result: d.commonToBothBps, unit: 'bps',
+      note: 'Leaving this inside the comparison would let a number identical on both sides decide it.',
+    });
+    add('Compare the two infrastructures', {
+      group: G_CMP,
+      formula: 'difference = vehicle infrastructure − direct infrastructure',
+      substitution: `${fmt(d.usdInfrastructureBps, 2)} − ${fmt(d.directInfrastructureBps, 2)}`,
+      result: d.infrastructureDifferenceBps, unit: 'bps',
+      note: `Positive means the direct route is cheaper. Verdict: ${cmp.cheaperInfrastructure}.`,
+      rows: d.directDetail.map((x) => ({
+        component: x.key,
+        direct_bps: x.bps,
+        vehicle_bps: d.usdDetail.find((y) => y.key === x.key || (x.key === 'creditCharge' && y.key === 'counterpartyCredit'))?.bps ?? 0,
+      })).concat(d.usdDetail.filter((y) => !d.directDetail.some((x) => x.key === y.key || (x.key === 'creditCharge' && y.key === 'counterpartyCredit')))
+        .map((y) => ({ component: y.key, direct_bps: 0, vehicle_bps: y.bps }))),
+    });
+    add('The all-in comparison, in the destination currency', {
+      group: G_CMP,
+      formula: `saving = all-in via ${vehicle} − all-in direct`,
+      substitution: `${fmt(cmp.usdAllInBuyer, 2)} − ${fmt(cmp.directAllInBuyer, 2)}`,
+      result: cmp.savingBuyerCurrency, unit: invoice.buyerCurrency,
+      note: d.verdictsAgree
+        ? `${fmt(cmp.savingBps, 1)} bps. Both readings agree: ${cmp.cheaperRoute} is cheaper.`
+        : `${fmt(cmp.savingBps, 1)} bps — and this reverses the infrastructure verdict, because the extra settlement day is worth ${fmt(Math.abs(d.extraSettlementDayRiskBps), 1)} bps here. Hedge the exposure and the infrastructure comparison governs.`,
+    });
+
+    checks.push({ what: `${vehicle} route all-in`, ...reconcile(usd.allInBCCT * vBuy, cmp.usdAllInBuyer, { decimals: 4 }) });
+    checks.push({ what: 'infrastructure difference', ...reconcile(((usdInfra - directInfra) / base) * 1e4, d.infrastructureDifferenceBps, { decimals: 3 }) });
+  } else {
+    add(`The incumbent route cannot be priced`, {
+      group: 'The incumbent route',
+      formula: '—',
+      substitution: usd?.reason ?? 'no vehicle currency in this fixing',
+      result: 'not available',
+    });
+  }
 
   return {
     title: `Invoice ${invoice.tradeId}: ${invoice.sellerCurrency} → ${invoice.buyerCurrency}, T+${invoice.settlementDays}`,
     steps,
-    check: reconcile(sum, invoice.invoicePrice.bcct, { decimals: 6 }),
-    checks: [
-      // The decimals each figure is published at, from invoice.js.
-      { what: 'components sum to the published price', ...reconcile(sum, invoice.invoicePrice.bcct, { decimals: 6 }) },
-      { what: 'buyer-currency restatement', ...reconcile(sum * invoice.numeraire.valueInBuyer, invoice.invoicePrice.inBuyerCurrency, { decimals: 4 }) },
-      { what: 'spread over base', ...reconcile(((sum - base) / base) * 1e4, invoice.invoicePrice.spreadOverBaseBps, { decimals: 3 }) },
-    ],
+    check: checks[0],
+    checks,
   };
 }
 
@@ -413,7 +609,12 @@ export function explainInvoice(invoice, ctx = {}) {
 export function toText(derivation) {
   if (derivation?.error) return `Cannot derive: ${derivation.error}`;
   const out = [derivation.title, '='.repeat(derivation.title.length), ''];
+  let group = null;
   for (const s of derivation.steps) {
+    if (s.group && s.group !== group) {
+      group = s.group;
+      out.push(`── ${group} ${'─'.repeat(Math.max(0, 72 - group.length))}`, '');
+    }
     out.push(`${s.n}. ${s.title}${s.section ? `   [${s.section}]` : ''}`);
     if (s.formula) out.push(`     formula:  ${s.formula}`);
     if (s.substitution) out.push(`     with:     ${s.substitution}`);

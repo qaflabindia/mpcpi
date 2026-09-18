@@ -911,15 +911,67 @@ test('warnings are surfaced, not suppressed', () => {
 
 const workedInvoice = result.book.priced.find((p) => !p.error);
 
+const workedDerivation = () => explainInvoice(workedInvoice, { basket: result.basket, fixing: result.fixing });
+
 test('an invoice derivation reproduces every published figure', () => {
-  const d = explainInvoice(workedInvoice);
+  const d = workedDerivation();
   assert.ok(!d.error, d.error);
-  assert.ok(d.steps.length >= 12, 'every component needs its own step');
+  assert.ok(d.steps.length >= 30, `only ${d.steps.length} steps — the derivation is incomplete`);
   for (const c of d.checks) assert.ok(c.reconciles, `${c.what}: derived ${c.recomputed}, published ${c.published}`);
 });
 
+test('the destination currency is derived, not asserted', () => {
+  // The buyer-currency figure previously appeared once, multiplied by a number
+  // that came from nowhere the reader could see.
+  const d = workedDerivation();
+  const vStep = d.steps.find((s) => new RegExp(`One BCC-T in ${workedInvoice.buyerCurrency}`).test(s.title));
+  assert.ok(vStep, 'the value of one BCC-T in the destination currency must be derived');
+  assert.match(vStep.substitution, /×/, 'showing the basket terms, not a symbolic sum');
+  near(vStep.result, workedInvoice.numeraire.valueInBuyer, 1e-6);
+
+  const payStep = d.steps.find((s) => /WHAT THE IMPORTER PAYS/.test(s.title));
+  assert.ok(payStep, 'the amount the importer actually pays must have its own step');
+  assert.equal(payStep.unit, workedInvoice.buyerCurrency);
+  near(payStep.result, workedInvoice.invoicePrice.inBuyerCurrency, Math.abs(payStep.result) * 1e-9);
+});
+
+test('the incumbent route is derived component by component', () => {
+  const d = workedDerivation();
+  const usdSteps = d.steps.filter((s) => /incumbent route/.test(s.group ?? ''));
+  assert.ok(usdSteps.length >= 8, `only ${usdSteps.length} steps for the route the tool compares against`);
+  for (const key of ['Convert', 'Settlement fees', 'Correspondent bank charges', 'Bilateral counterparty credit', 'Principal risk', 'Nostro funding']) {
+    assert.ok(usdSteps.some((s) => s.title.includes(key)), `the ${key} component has no working`);
+  }
+  for (const s of usdSteps) {
+    assert.ok(s.formula && s.substitution, `"${s.title}" shows no arithmetic`);
+  }
+  assert.ok(d.checks.some((c) => /all-in/.test(c.what) && c.reconciles), 'the incumbent total must reconcile too');
+});
+
+test('the comparison shows both infrastructures side by side', () => {
+  const d = workedDerivation();
+  const cmp = d.steps.find((s) => /Compare the two infrastructures/.test(s.title));
+  assert.ok(cmp, 'the comparison itself needs a step');
+  assert.ok(Array.isArray(cmp.rows) && cmp.rows.length >= 8, 'with a component-by-component table');
+  for (const row of cmp.rows) {
+    assert.ok('direct_bps' in row && 'vehicle_bps' in row, 'each row must carry both routes');
+  }
+  // every component of both routes must appear exactly once
+  const keys = cmp.rows.map((r) => r.component);
+  assert.equal(new Set(keys).size, keys.length, 'a component is listed twice');
+  assert.ok(d.checks.some((c) => /infrastructure difference/.test(c.what) && c.reconciles));
+});
+
+test('the working is grouped so a 30-step derivation stays navigable', () => {
+  const d = workedDerivation();
+  const groups = [...new Set(d.steps.map((s) => s.group).filter(Boolean))];
+  assert.ok(groups.length >= 6, `only ${groups.length} groups`);
+  for (const s of d.steps) assert.ok(s.group, `step ${s.n} "${s.title}" has no group`);
+  assert.ok(toText(d).includes('──'), 'the text rendering must carry the group headings too');
+});
+
 test('every derivation step shows formula, substituted numbers and result', () => {
-  const d = explainInvoice(workedInvoice);
+  const d = workedDerivation();
   for (const s of d.steps) {
     assert.ok(s.formula, `step ${s.n} "${s.title}" has no formula`);
     assert.ok(s.substitution, `step ${s.n} "${s.title}" does not show the numbers substituted in`);
@@ -931,7 +983,7 @@ test('a derivation that has drifted from the code says so', () => {
   // The whole point. An explanation that cannot be wrong is not evidence.
   const drifted = structuredClone(workedInvoice);
   drifted.invoicePrice.bcct *= 1.0001;
-  const d = explainInvoice(drifted);
+  const d = explainInvoice(drifted, { basket: result.basket, fixing: result.fixing });
   const sumCheck = d.checks.find((c) => /components sum/.test(c.what));
   assert.equal(sumCheck.reconciles, false, 'a published price that disagrees with its components must be caught');
   assert.ok(sumCheck.absoluteDifference > 0);
@@ -997,6 +1049,32 @@ test('but a drift larger than the rounding is still caught', () => {
   const c = explainInvoice(t).checks.find((x) => /spread/.test(x.what));
   assert.equal(c.reconciles, false, `a 0.01 bps drift slipped through an allowance of ${c.allowedDifference}`);
   assert.ok(c.allowedDifference <= 0.0005 + 1e-12, 'the allowance must be half a unit in the last published place');
+});
+
+test('the panel never awaits requestAnimationFrame to make progress', () => {
+  // A hidden or backgrounded tab never fires rAF. Awaiting it inside run()
+  // hung the analysis forever and left the panel showing "computing…" — and
+  // the panel lives in an iframe that is routinely not visible.
+  const src = readFileSync(new URL('../extension/panel/app.js', import.meta.url), 'utf8');
+  const awaited = /await\s+new\s+Promise\s*\(\s*\(?\s*\w*\s*\)?\s*=>\s*requestAnimationFrame/.test(src);
+  assert.equal(awaited, false, 'run() must not block on a frame that may never come');
+
+  // Any remaining use must be raced against a timer.
+  const uses = [...src.matchAll(/requestAnimationFrame/g)].length;
+  if (uses) {
+    assert.ok(/setTimeout\(finish/.test(src), 'rAF is used but not raced against a timer fallback');
+  }
+});
+
+test('the published infrastructure difference agrees with its own components', () => {
+  // It was the difference of two ALREADY-ROUNDED figures, so its error
+  // compounded and the number disagreed with the parts shown beside it.
+  for (const p of result.book.priced.filter((x) => !x.error)) {
+    const d = p.comparison.differential;
+    const fromParts = d.usdInfrastructureBps - d.directInfrastructureBps;
+    assert.ok(Math.abs(d.infrastructureDifferenceBps - fromParts) <= 0.0015,
+      `${p.tradeId}: published ${d.infrastructureDifferenceBps}, parts give ${fromParts}`);
+  }
 });
 
 /* ── the help registry ────────────────────────────────────────── */

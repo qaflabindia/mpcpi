@@ -334,7 +334,10 @@ export function priceInvoice(trade, ctx = {}) {
         commonNote: 'Interest carry, unhedged FX risk and counterparty condition. Identical on both routes and excluded from the comparison below.',
         directInfrastructureBps: toBps(directInfraTotal),
         usdInfrastructureBps: toBps(usd.infraTotalBCCT),
-        infrastructureDifferenceBps: round(toBps(usd.infraTotalBCCT) - toBps(directInfraTotal), 3),
+        // Computed from the unrounded totals and rounded ONCE. Subtracting two
+        // already-rounded figures compounds their rounding error, which made
+        // the published difference disagree with its own components.
+        infrastructureDifferenceBps: round(((usd.infraTotalBCCT - directInfraTotal) / baseBCCT) * 1e4, 3),
         extraSettlementDayRiskBps: toBps(usd.commonBCCT - commonTotal),
         directDetail: directLines.map((l) => ({ key: l.key, bps: toBps(l.amountBCCT), label: l.label })),
         usdDetail: usd.lines.map((l) => ({ key: l.key, bps: toBps(l.amountBCCT), label: l.label })),

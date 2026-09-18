@@ -211,6 +211,12 @@ the reasons are worth stating because they are the failure modes this kind of mo
   element never carries the class. Light-theme overrides written against those class names therefore
   matched nothing and the panel stayed dark-on-light. Components now take their colours from the
   theme variables directly.
+- `run()` yielded with `await new Promise(r => requestAnimationFrame(r))` to let the "computing…"
+  state paint. A hidden or backgrounded tab never fires rAF, so the analysis **hung forever** — and
+  the panel lives in an iframe that is routinely not visible. The yield is now raced against a timer.
+- The published `infrastructureDifferenceBps` was the difference of two already-rounded figures, so
+  its rounding error compounded and it disagreed with the components printed beside it. It is now
+  computed from the unrounded totals and rounded once.
 
 Correcting only those three would have flipped the book to 6/6 the other way, which was equally
 suspicious. Two further errors turned out to favour the framework:
@@ -253,7 +259,11 @@ published figure a second time and shows it as numbered steps:
       note:     Over the settlement CYCLE, not the credit period.
 ```
 
-Available for the invoice build-up, the FX fixing (including a worked `exp(p_i − p_j)` for any pair),
+An invoice derivation runs to 33 steps in seven groups: what one BCC-T is worth **in each side's
+currency** and where those numbers come from, the commercial base, the costs common to both routes,
+the direct build-up, the total restated in the destination currency, **the incumbent dollar route
+priced component by component**, and the comparison with a side-by-side table of both
+infrastructures. Also available for the FX fixing (including a worked `exp(p_i − p_j)` for any pair),
 the basket constitution, any indicator's winsorise → standardise → map chain, and any single quote's
 weight. Copy as text or download it for review.
 
@@ -326,7 +336,7 @@ before a model ever sees it, and the agent's system prompt states the rule.
 ## Development
 
 ```bash
-npm test                  # 117 assertions over the computational core
+npm test                  # 123 assertions over the computational core
 npm run check:all         # secrets scan + reference lint + tests
 node tools/check-secrets.mjs   # refuses to ship a file containing a credential
 node tools/lint-extension.js   # manifest paths, imports, MV3 CSP constraints
