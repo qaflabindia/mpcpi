@@ -62,7 +62,7 @@ No API key is needed for any of the arithmetic. A model provider is required onl
 | **Data** | ingestion | Every uncertain column match and coerced cell is reported, not applied silently |
 | **Fixing** | §8, §9, §37 | Rates quoted in BCC-T as the primary table, the vehicle marked as a satellite; input quotes violating triangular consistency by hundreds of bps against a published matrix consistent to ~1e-12 |
 | **Basket** | §5–§7 | The cap binding on the largest currency, and the self-reference attenuation that makes a common basket unable to measure its own members |
-| **Diagnostics** | §10–§16 | Leading against lagging, with a horizon slider; the excess-usage regression with standard errors |
+| **Diagnostics** | §10–§16 | Leading against lagging, with a horizon slider; the excess-usage regression with standard errors; the debt-adjusted value of every currency, the dollar included ([method](docs/DEBT-ADJUSTED-VALUE.md)) |
 | **Netting** | §19, §20, §27 | Compression *and* the creditor persistence that actually decides whether the design works |
 | **Invoice** | §23–§25, §37 | The line-by-line price, and the honest comparison against the dollar route |
 | **Workings** | all | Every figure derived again step by step — formula, substituted numbers, result — and reconciled against what was published |
@@ -308,6 +308,7 @@ extension/
     basket.js       §5–§7 constitution, cap-and-redistribute, own-currency-excluded strength
     metrics.js      leading/lagging registry, §11 fixed-reference scoring, horizon blend
     diagnostics.js  §10 CHS, §14 CPS, §16 excess-usage regression, §37 dependency
+    fiscal-backing.js debt-adjusted value: fiscal gap and debasement pressure, every currency on one rule
     netting.js      §19 compression, §20 persistence, §27 symmetric adjustment, stress
     risk.js         §22 waterfall, §24 wrong-way haircuts, §25 supervisory bands
     invoice.js      the price, plus the USD route and §28 adoption cost
@@ -361,7 +362,7 @@ before a model ever sees it, and the agent's system prompt states the rule.
 ## Development
 
 ```bash
-npm test                  # 127 assertions over the computational core
+npm test                  # 136 assertions over the computational core
 npm run check:all         # secrets scan + reference lint + tests
 node tools/check-secrets.mjs   # refuses to ship a file containing a credential
 node tools/lint-extension.js   # manifest paths, imports, MV3 CSP constraints

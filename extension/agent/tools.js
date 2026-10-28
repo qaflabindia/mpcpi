@@ -53,7 +53,7 @@ export function buildTools(ctx) {
         headline: result.headline,
         basket: result.basket?.components.map((c) => ({ code: c.code, weight: c.finalWeight, capped: c.capped })),
         fixing: { accepted: result.fixing.diagnostics.quotesAccepted, rejected: result.fixing.diagnostics.outliers.length, rmseBps: result.fixing.diagnostics.weightedRMSEbps, triangularConsistency: result.consistency?.ok },
-        diagnostics: result.diagnostics.map((d) => ({ participant: d.participant, currency: d.currency, chs: d.health?.chs, leading: d.composite?.leading, lagging: d.composite?.lagging, divergence: d.composite?.divergence, signal: d.composite?.signal, band: d.band.band })),
+        diagnostics: result.diagnostics.map((d) => ({ participant: d.participant, currency: d.currency, chs: d.health?.chs, leading: d.composite?.leading, lagging: d.composite?.lagging, divergence: d.composite?.divergence, signal: d.composite?.signal, band: d.band?.band ?? null })),
         invoiceCount: result.book?.summary?.n ?? 0,
         routeComparison: result.headline?.routeComparison ?? null,
         warnings: result.warnings,

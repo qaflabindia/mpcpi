@@ -26,6 +26,8 @@ import { HELP } from '../extension/panel/help.js';
 import { SECTIONS, GLOSSARY } from '../extension/panel/copy.js';
 import { ToolRegistry } from '../extension/agent/tools.js';
 import { analyze } from '../extension/core/pipeline.js';
+import { fiscalBacking, fiscalBackingTable, relativeAdjustment } from '../extension/core/fiscal-backing.js';
+import * as sample from '../extension/samples/sample-data.js';
 import { ols, normInv, autocorr1 } from '../extension/core/num.js';
 import fixtures from './fixtures.js';
 
@@ -1155,6 +1157,85 @@ test('the glossary covers the terms the copy cannot avoid', () => {
   for (const must of ['basis point', 'BCC-T', 'spread', 'settlement', 'netting', 'hedge']) {
     assert.ok(GLOSSARY[must], `the glossary is missing "${must}"`);
   }
+});
+
+
+/* ── debt-adjusted value ─────────────────────────────────────── */
+
+const US26 = { debtGdp: 1.00, primaryBalance: -0.028, effectiveRate: 0.035, nominalGrowth: 0.045, fxDebtShare: 0 };
+
+test('the fiscal gap is the stabilising primary balance less the actual one', () => {
+  const f = fiscalBacking(US26, 10);
+  near(f.stabilisingPrimaryBalance, (1.00 * (0.035 - 0.045)) / 1.045, 1e-6);
+  near(f.fiscalGap, f.stabilisingPrimaryBalance + 0.028, 1e-6);
+  near(f.debasementPressure, f.fiscalGap / (1.00 - f.fiscalGap), 1e-6);
+  near(f.valueAfterHorizon, Math.pow(1 + f.debasementPressure, -10), 1e-5);
+});
+
+test('running the stabilising balance leaves the debt ratio unchanged and needs no debasement', () => {
+  const d = 0.9, r = 0.06, g = 0.04;
+  const pbStar = (d * (r - g)) / (1 + g);
+  near(d * (1 + r) / (1 + g) - pbStar, d, 1e-12, 'debt dynamics');
+  const f = fiscalBacking({ debtGdp: d, primaryBalance: pbStar + 1e-9, effectiveRate: r, nominalGrowth: g });
+  assert.equal(f.debasementPressure, 0);
+});
+
+test('the debasement pressure erodes exactly the gap in one year', () => {
+  const f = fiscalBacking({ ...US26, fxDebtShare: 0.2 });
+  const pi = f.debasementPressure, dL = 1.00 * 0.8;
+  near(dL * pi / (1 + pi), f.fiscalGap, 1e-6);
+});
+
+test('foreign-currency debt cannot be inflated away, and is not treated as if it could', () => {
+  const f = fiscalBacking({ debtGdp: 0.30, primaryBalance: -0.06, effectiveRate: 0.08, nominalGrowth: 0.05, fxDebtShare: 0.9 });
+  assert.equal(f.debasementPressure, null);
+  assert.match(f.channel, /default or restructuring/);
+  const more = fiscalBacking({ debtGdp: 0.9, primaryBalance: -0.02, effectiveRate: 0.05, nominalGrowth: 0.05, fxDebtShare: 0.5 });
+  const less = fiscalBacking({ debtGdp: 0.9, primaryBalance: -0.02, effectiveRate: 0.05, nominalGrowth: 0.05, fxDebtShare: 0 });
+  assert.ok(more.debasementPressure > less.debasementPressure, 'a smaller inflatable base needs more inflation');
+});
+
+test('missing inputs are reported, never scored as healthy', () => {
+  const t = fiscalBackingTable([{ participant: 'XX', debtGdp: 0.5 }, { participant: 'US', ...US26 }]);
+  const xx = t.find((r) => r.participant === 'XX');
+  assert.ok(xx.error && xx.missing.includes('effectiveRate'));
+  assert.equal(xx.debasementPressure, undefined);
+  assert.equal(t[t.length - 1].participant, 'XX', 'an uncomputable row ranks last, not as the healthiest');
+});
+
+test('the relative adjustment favours the currency under less fiscal pressure', () => {
+  const a = { debasementPressure: 0.01 }, b = { debasementPressure: 0.03 };
+  const adj = relativeAdjustment(a, b, 10);
+  near(adj.factor, Math.pow(1.03 / 1.01, 10), 1e-6);
+  assert.ok(adj.factor > 1);
+  near(relativeAdjustment(b, a, 10).factor * adj.factor, 1, 1e-5, 'inverse pair');
+});
+
+test('the dollar is measured by the same rule as every member', () => {
+  const r = analyze({ ...sample });
+  const us = r.fiscalBacking.find((x) => x.currency === 'USD');
+  assert.ok(us && !us.error, 'USD has a debt-adjusted value');
+  const d = r.diagnostics.find((x) => x.participant === 'US');
+  assert.equal(d.role, 'reference');
+  assert.equal(d.band, null, 'a reference economy takes no part in clearing');
+  assert.ok(d.health.chs !== null);
+  const ccys = new Set(r.excessUsage.observations.map((o) => o.currency));
+  assert.ok(ccys.has('USD'), 'the excess-usage regression includes the dollar');
+});
+
+test('a currency dropped from the excess-usage regression is named', () => {
+  const r = analyze({ ...sample, fundamentals: sample.fundamentals.filter((f) => f.participant !== 'US') });
+  assert.ok(r.warnings.some((w) => /excludes .*USD/.test(w)), 'the missing dollar is reported');
+});
+
+test('debt never moves the basket (§4)', () => {
+  const base = analyze({ ...sample });
+  const stressed = analyze({ ...sample, fundamentals: sample.fundamentals.map((f) => ({ ...f, debtGdp: f.debtGdp * 3, primaryBalance: f.primaryBalance - 0.05 })) });
+  for (const c of base.basket.components) {
+    const s = stressed.basket.components.find((x) => x.code === c.code);
+    assert.equal(s.quantity, c.quantity, `${c.code} quantity`);
+  }
+  assert.ok(!base.basket.components.some((c) => c.code === 'USD'));
 });
 
 /* ── report ──────────────────────────────────────────────────── */

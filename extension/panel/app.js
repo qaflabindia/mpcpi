@@ -642,6 +642,7 @@ function renderDiagnostics() {
   CH.render('chartDiverge', d.length ? CH.divergence(d) : null);
   CH.render('chartRadar', d.length ? CH.healthRadar(d) : null);
   renderDiagTable();
+  renderFiscalBacking();
 
   const eu = S.result?.excessUsage;
   const box = $('excessTable');
@@ -661,6 +662,23 @@ function renderDiagnostics() {
   ], eu.coefficients));
   box.append(el('div', 'note note-info mt-3', esc(eu.interpretation)));
   box.append(el('div', 'note note-warn mt-2', esc(eu.caveat)));
+}
+
+function renderFiscalBacking() {
+  const rows = S.result?.fiscalBacking || [];
+  const host = $('fiscalTable');
+  if (!rows.length) { host.replaceChildren(el('div', 'hint', 'Supply effectiveRate and nominalGrowth in the Fundamentals sheet to compute this.')); return; }
+  host.replaceChildren(table([
+    { label: 'economy', get: (r) => `<b>${esc(r.participant)}</b>${r.currency ? ` <span class="text-slate-500">${esc(r.currency)}</span>` : ''}` },
+    { label: 'debt / GDP', num: true, get: (r) => (r.error ? '—' : pctOf(r.inputs.debtGdp, 1)) },
+    { label: 'r − g', num: true, get: (r) => (r.error ? '—' : pctOf(r.rMinusG, 2)) },
+    { label: 'primary balance', num: true, get: (r) => (r.error ? '—' : pctOf(r.inputs.primaryBalance, 2)) },
+    { label: 'needed to hold debt steady', num: true, get: (r) => (r.error ? '—' : pctOf(r.stabilisingPrimaryBalance, 2)) },
+    { label: 'fiscal gap', num: true, get: (r) => (r.error ? '—' : pctOf(r.fiscalGap, 2)) },
+    { label: 'debasement / yr', num: true, get: (r) => (r.error ? '—' : r.debasementPressure == null ? '<span class="text-rose-400">n/a</span>' : `<b>${pctOf(r.debasementPressure, 2)}</b>`) },
+    { label: `value lost over ${S.config.fiscalHorizonYears ?? 10}y`, num: true, get: (r) => (r.cumulativeDebasement == null ? '—' : pctOf(r.cumulativeDebasement, 1)) },
+    { label: 'note', get: (r) => `<span class="text-[11px] text-slate-400">${esc(r.error || r.channel)}</span>` },
+  ], rows));
 }
 
 function renderDiagTable() {
@@ -708,7 +726,7 @@ function renderDiagTable() {
     { label: `composite @${S.horizon}d`, help: 'composite', num: true, get: (r) => (r.live?.index != null ? `<b>${fmt(r.live.index, 1)}</b>` : '—') },
     { label: 'divergence', help: 'divergence', num: true, get: (r) => (r.live?.divergence != null ? `<span class="${r.live.divergence < -12 ? 'text-rose-400' : r.live.divergence > 12 ? 'text-emerald-400' : 'text-slate-400'}">${r.live.divergence >= 0 ? '+' : ''}${fmt(r.live.divergence, 1)}</span>` : '—') },
     { label: 'signal', get: (r) => (r.live ? `<span class="text-[11px] text-slate-400">${esc(r.live.signal.replace(/-/g, ' '))}</span>` : '—') },
-    { label: 'band', help: 'band', get: (r) => bandBadge(r.band.band) },
+    { label: 'band', help: 'band', get: (r) => (r.band ? bandBadge(r.band.band) : '<span class="text-[11px] text-slate-500">reference</span>') },
     { label: 'CPS', help: 'cps', num: true, get: (r) => (r.power?.cps != null ? fmt(r.power.cps, 1) : '—') },
   ], rows, { onClick: (r) => showParticipant(r) }));
 }
@@ -733,11 +751,11 @@ function showParticipant(r) {
   modal(`${r.participant}${r.currency ? ` · ${r.currency}` : ''}`, `
     <div class="grid gap-2 sm:grid-cols-3">
       <div class="stat"><div class="stat-k">CHS</div><div class="stat-v">${r.health?.chs != null ? fmt(r.health.chs, 1) : '—'}</div><div class="stat-s">${r.health?.confidence ?? ''} confidence</div></div>
-      <div class="stat"><div class="stat-k">supervisory band</div><div class="stat-v">${band.band}</div><div class="stat-s">${esc(band.label)}</div></div>
-      <div class="stat"><div class="stat-k">smoothed score</div><div class="stat-v">${fmt(band.smoothed, 1)}</div><div class="stat-s">over ${band.window?.length ?? 0} period(s)</div></div>
+      ${band ? `<div class="stat"><div class="stat-k">supervisory band</div><div class="stat-v">${band.band}</div><div class="stat-s">${esc(band.label)}</div></div>
+      <div class="stat"><div class="stat-k">smoothed score</div><div class="stat-v">${fmt(band.smoothed, 1)}</div><div class="stat-s">over ${band.window?.length ?? 0} period(s)</div></div>` : ''}
     </div>
-    ${band.note ? `<div class="note note-warn mt-3">${esc(band.note)}</div>` : ''}
-    <div class="note note-info mt-2">${esc(band.procyclicalityGuard)}</div>
+    ${band?.note ? `<div class="note note-warn mt-3">${esc(band.note)}</div>` : ''}
+    ${band ? `<div class="note note-info mt-2">${esc(band.procyclicalityGuard)}</div>` : '<div class="note note-info mt-2">A reference economy: measured by the same rules as the members, but outside the basket and the clearing system, so it has no band.</div>'}
     ${sect('Leading — moves before the outcome', 'text-sky-400', block('leading'))}
     ${sect('Lagging — confirms after the outcome', 'text-violet-400', block('lagging'))}
     ${r.collateral ? `<h4 class="mt-4 mb-1 text-[12px] font-semibold text-amber-400">Collateral (§24)</h4>
@@ -1061,6 +1079,7 @@ function pricingContext() {
     if (Number.isFinite(c.annualVol)) vols[code] = c.annualVol;
   }
   for (const d of r.diagnostics) {
+    if (!d.band) continue;
     bands[d.participant] = d.band;
     if (d.currency) bands[d.currency] = d.band;
     if (d.collateral) { collateral[d.participant] = d.collateral; if (d.currency) collateral[d.currency] = d.collateral; }

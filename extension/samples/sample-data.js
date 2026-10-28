@@ -54,12 +54,30 @@ export const trades = [
   { id: 'T-006', description: 'Platinum group metals',      exporter: 'ZA', importer: 'IN', sellerCurrency: 'ZAR', buyerCurrency: 'INR', quantity: 900,   unitPrice: 19800,  settlementDays: 21, hedgeRatio: 0.10, incoterm: 'CIF', sector: 'metals' },
 ];
 
+/**
+ * effectiveRate and nominalGrowth feed the debt-adjusted value (fiscal-backing.js).
+ * US is a reference economy: it carries a currency column because USD is not in
+ * the basket, and it is here so the dollar is measured by the same rules as
+ * every member. Without it the §16 regression has no dollar observation at all.
+ *
+ * US fiscal inputs are federal-government figures for FY2026, the one block in
+ * this file taken from published estimates (retrieved 2026-10-28):
+ *   debtGdp 1.00          debt held by the public, CRFB end-FY2026 estimate
+ *   primaryBalance −0.028 deficit 6.2% of GDP (CBO Monthly Budget Review,
+ *                         Sept 2026) less net interest 3.4% (CRFB)
+ *   effectiveRate 0.035   net interest ≈ $1.1tn over ≈ $31tn average debt
+ *   interestRevenue 0.20  net interest ≈ $1.1tn over revenue ≈ $5.4tn
+ * nominalGrowth 0.045 is an assumption, and every other US field is
+ * illustrative. Federal debt is narrower than the general-government debt used
+ * for the members; IMF general-government gross debt was 124.4% of GDP in 2025.
+ */
 export const fundamentals = [
-  { participant: 'CN', year: 2026, inflationYoY: 0.008, inflationVol5y: 0.011, debtGdp: 0.88, interestRevenue: 0.09,  primaryBalance: -0.042, fxDebtShare: 0.03, avgMaturityYrs: 7.4,  refinancingNeed: 0.19, reserveMonths: 13.5, stExternalDebt: 0.22, currentAccount: 0.015,  niipGdp: 0.13,  bankCapital: 0.152, privateCreditGap: 0.07,  cbIndependence: 0.42 },
-  { participant: 'IN', year: 2026, inflationYoY: 0.049, inflationVol5y: 0.018, debtGdp: 0.82, interestRevenue: 0.27,  primaryBalance: -0.010, fxDebtShare: 0.04, avgMaturityYrs: 12.1, refinancingNeed: 0.18, reserveMonths: 10.2, stExternalDebt: 0.30, currentAccount: -0.012, niipGdp: -0.11, bankCapital: 0.168, privateCreditGap: 0.02,  cbIndependence: 0.78 },
-  { participant: 'BR', year: 2026, inflationYoY: 0.042, inflationVol5y: 0.024, debtGdp: 0.87, interestRevenue: 0.31,  primaryBalance: -0.006, fxDebtShare: 0.06, avgMaturityYrs: 4.1,  refinancingNeed: 0.34, reserveMonths: 14.8, stExternalDebt: 0.18, currentAccount: -0.021, niipGdp: -0.34, bankCapital: 0.158, privateCreditGap: -0.01, cbIndependence: 0.71 },
-  { participant: 'RU', year: 2026, inflationYoY: 0.084, inflationVol5y: 0.041, debtGdp: 0.21, interestRevenue: 0.07,  primaryBalance: -0.018, fxDebtShare: 0.19, avgMaturityYrs: 6.2,  refinancingNeed: 0.11, reserveMonths: 16.1, stExternalDebt: 0.12, currentAccount: 0.042,  niipGdp: 0.28,  bankCapital: 0.121, privateCreditGap: 0.05,  cbIndependence: 0.34 },
-  { participant: 'ZA', year: 2026, inflationYoY: 0.045, inflationVol5y: 0.019, debtGdp: 0.75, interestRevenue: 0.22,  primaryBalance:  0.008, fxDebtShare: 0.11, avgMaturityYrs: 11.2, refinancingNeed: 0.16, reserveMonths: 5.4,  stExternalDebt: 0.41, currentAccount: -0.016, niipGdp: 0.07,  bankCapital: 0.172, privateCreditGap: -0.03, cbIndependence: 0.82 },
+  { participant: 'CN', year: 2026, inflationYoY: 0.008, inflationVol5y: 0.011, debtGdp: 0.88, interestRevenue: 0.09,  primaryBalance: -0.042, effectiveRate: 0.026, nominalGrowth: 0.042, fxDebtShare: 0.03, avgMaturityYrs: 7.4,  refinancingNeed: 0.19, reserveMonths: 13.5, stExternalDebt: 0.22, currentAccount: 0.015,  niipGdp: 0.13,  bankCapital: 0.152, privateCreditGap: 0.07,  cbIndependence: 0.42 },
+  { participant: 'IN', year: 2026, inflationYoY: 0.049, inflationVol5y: 0.018, debtGdp: 0.82, interestRevenue: 0.27,  primaryBalance: -0.010, effectiveRate: 0.072, nominalGrowth: 0.100, fxDebtShare: 0.04, avgMaturityYrs: 12.1, refinancingNeed: 0.18, reserveMonths: 10.2, stExternalDebt: 0.30, currentAccount: -0.012, niipGdp: -0.11, bankCapital: 0.168, privateCreditGap: 0.02,  cbIndependence: 0.78 },
+  { participant: 'BR', year: 2026, inflationYoY: 0.042, inflationVol5y: 0.024, debtGdp: 0.87, interestRevenue: 0.31,  primaryBalance: -0.006, effectiveRate: 0.115, nominalGrowth: 0.075, fxDebtShare: 0.06, avgMaturityYrs: 4.1,  refinancingNeed: 0.34, reserveMonths: 14.8, stExternalDebt: 0.18, currentAccount: -0.021, niipGdp: -0.34, bankCapital: 0.158, privateCreditGap: -0.01, cbIndependence: 0.71 },
+  { participant: 'RU', year: 2026, inflationYoY: 0.084, inflationVol5y: 0.041, debtGdp: 0.21, interestRevenue: 0.07,  primaryBalance: -0.018, effectiveRate: 0.090, nominalGrowth: 0.080, fxDebtShare: 0.19, avgMaturityYrs: 6.2,  refinancingNeed: 0.11, reserveMonths: 16.1, stExternalDebt: 0.12, currentAccount: 0.042,  niipGdp: 0.28,  bankCapital: 0.121, privateCreditGap: 0.05,  cbIndependence: 0.34 },
+  { participant: 'ZA', year: 2026, inflationYoY: 0.045, inflationVol5y: 0.019, debtGdp: 0.75, interestRevenue: 0.22,  primaryBalance:  0.008, effectiveRate: 0.095, nominalGrowth: 0.060, fxDebtShare: 0.11, avgMaturityYrs: 11.2, refinancingNeed: 0.16, reserveMonths: 5.4,  stExternalDebt: 0.41, currentAccount: -0.016, niipGdp: 0.07,  bankCapital: 0.172, privateCreditGap: -0.03, cbIndependence: 0.82 },
+  { participant: 'US', currency: 'USD', year: 2026, inflationYoY: 0.029, inflationVol5y: 0.020, debtGdp: 1.00, interestRevenue: 0.20, primaryBalance: -0.028, effectiveRate: 0.035, nominalGrowth: 0.045, fxDebtShare: 0.00, avgMaturityYrs: 5.9, reserveMonths: 1.0, currentAccount: -0.040, niipGdp: -0.85, bankCapital: 0.140, privateCreditGap: 0.00, cbIndependence: 0.80 },
 ];
 
 export const leading = [

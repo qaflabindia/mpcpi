@@ -11,6 +11,7 @@
 import { runFixing, verifyConsistency } from './fx-fixing.js';
 import { buildBasket, valueIn, strengthIndex, weightDrift, selfReferenceAttenuation, bcctQuotes } from './basket.js';
 import { currencyHealth, currencyPower, excessUsage, mandatoryDollarDependency } from './diagnostics.js';
+import { fiscalBackingTable } from './fiscal-backing.js';
 import { scoreObservation, composite, INDICATORS } from './metrics.js';
 import { assignBand, valueCollateral, creditCapacity, legalReadiness, LEGAL_OPINION_CHECKLIST } from './risk.js';
 import { netPeriod, nettingProgramme, symmetricAdjustment } from './netting.js';
@@ -26,6 +27,7 @@ export const DEFAULT_CONFIG = {
   clearingFeeBps: 1.5,
   nettingRebateShare: 0.5,
   currencyFixedEffects: false,
+  fiscalHorizonYears: 10,     // debt-adjusted value: years over which debasement compounds
   pricing: {},
 };
 
@@ -121,6 +123,7 @@ export function analyze(tables, config = {}) {
   ].filter(Boolean));
 
   const participantsCfg = indexBy(t.participants, 'participant');
+  const tradeParties = new Set((t.trades || []).flatMap((x) => [upper(x.exporter), upper(x.importer)]));
   const collateralByParticipant = {};
   for (const row of t.participants || []) {
     const p = upper(row.participant);
@@ -147,6 +150,19 @@ export function analyze(tables, config = {}) {
     const scored = hasAny ? scoreObservation(obs) : null;
     const comp = scored ? composite(scored, cfg.defaultHorizonDays ?? 30, cfg.tauDays) : null;
 
+    // Currency power is per-CURRENCY; attach it when the participant maps to one.
+    // An economy outside the basket (the US) names its currency in the
+    // fundamentals row, and is measured but takes no part in clearing.
+    const ccy = (t.currencies || []).find((c) => upper(c.country) === p || upper(c.code) === p);
+    const ccyCode = ccy ? upper(ccy.code) : (fundamentals[p]?.currency ? upper(fundamentals[p].currency) : null);
+    const uRows = ccyCode ? usageByCcy[ccyCode] : usageByCcy[p];
+    const power = uRows?.length ? currencyPower(uRows[uRows.length - 1]) : null;
+    const reference = !ccy && Boolean(ccyCode) && !participantsCfg[p] && !tradeParties.has(p);
+    if (reference) {
+      diagnostics.push({ participant: p, currency: ccyCode, role: 'reference', health, scored, composite: comp, band: null, collateral: null, power });
+      continue;
+    }
+
     const histRaw = participantsCfg[p]?.sustainabilityHistory;
     const hist = Array.isArray(histRaw) && histRaw.length
       ? histRaw
@@ -156,12 +172,7 @@ export function analyze(tables, config = {}) {
 
     const collateral = collateralByParticipant[p]?.length ? valueCollateral(collateralByParticipant[p]) : null;
 
-    // Currency power is per-CURRENCY; attach it when the participant maps to one.
-    const ccy = (t.currencies || []).find((c) => upper(c.country) === p || upper(c.code) === p);
-    const uRows = ccy ? usageByCcy[upper(ccy.code)] : usageByCcy[p];
-    const power = uRows?.length ? currencyPower(uRows[uRows.length - 1]) : null;
-
-    diagnostics.push({ participant: p, currency: ccy ? upper(ccy.code) : null, health, scored, composite: comp, band, collateral, power });
+    diagnostics.push({ participant: p, currency: ccyCode, role: 'member', health, scored, composite: comp, band, collateral, power });
   }
 
   // An indicator absent for every participant means the workbook has no such
@@ -199,14 +210,28 @@ export function analyze(tables, config = {}) {
   if (usageRows.length >= 6) {
     const chsByCcy = {};
     for (const d of diagnostics) if (d.currency && d.health?.chs != null) chsByCcy[d.currency] = d.health.chs;
-    const panel = usageRows.map((u) => {
+    let panel = usageRows.map((u) => {
       const c = upper(u.currency);
       const cps = currencyPower(u).cps;
       return { currency: c, year: u.year ?? 'NA', cps, chs: chsByCcy[c] ?? null, marketDepth: num(u.marketDepth, NaN), tradeScale: num(u.tradeScale, NaN) };
-    }).filter((r) => r.cps != null && r.chs != null && Number.isFinite(r.marketDepth) && Number.isFinite(r.tradeScale));
+    });
+    // A currency with usage data but no fundamentals cannot enter the
+    // regression. Say which, because the one most often missing is the dollar,
+    // and a "dollar premium" estimated without the dollar measures nothing.
+    const unscored = [...new Set(panel.filter((r) => r.chs == null).map((r) => r.currency))].sort();
+    if (unscored.length) warnings.push(`Excess-usage regression excludes ${unscored.join(', ')}: usage data but no fundamentals row, so no health score. Add a fundamentals row with a currency column for each.`);
+    panel = panel.filter((r) => r.cps != null && r.chs != null && Number.isFinite(r.marketDepth) && Number.isFinite(r.tradeScale));
     excess = panel.length >= 6 ? excessUsage(panel, { currencyFixedEffects: cfg.currencyFixedEffects }) : { error: `only ${panel.length} complete currency-year observations after joining usage to CHS; §16 needs at least 6`, usable: panel.length };
     if (excess.error) warnings.push(`Excess-usage regression not run: ${excess.error}`);
   }
+
+  /* ── 4b. Debt-adjusted value: every economy on the same rule ───────── */
+  const ccyOf = Object.fromEntries(diagnostics.map((d) => [d.participant, d.currency]));
+  const fiscalBacking = (t.fundamentals || []).length
+    ? fiscalBackingTable((t.fundamentals || []).map((row) => ({ ...row, currency: ccyOf[upper(row.participant)] ?? row.currency })), cfg.fiscalHorizonYears)
+    : [];
+  const fbErrors = fiscalBacking.filter((r) => r.error);
+  if (fbErrors.length) warnings.push(`Debt-adjusted value not computed for ${fbErrors.map((r) => `${r.participant} (${r.error})`).join('; ')}.`);
 
   /* ── 5. Netting (§19-§20) ────────────────────────────────────────────── */
   let netting = null, programme = null, adjustment = null;
@@ -332,7 +357,7 @@ export function analyze(tables, config = {}) {
     config: cfg,
     fixing, consistency,
     basket, basketValues, drift, selfReference: selfRef, strength, pivot,
-    diagnostics, diagnosticsCoverage, excessUsage: excess,
+    diagnostics, diagnosticsCoverage, excessUsage: excess, fiscalBacking,
     netting, programme, adjustment, realisedNetting,
     book, legal, dependency,
     warnings: [...new Set(warnings)],
